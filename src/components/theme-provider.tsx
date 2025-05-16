@@ -40,7 +40,9 @@ export default function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement;
 
+    // Remove both class names and data attribute
     root.classList.remove("light", "dark");
+    root.removeAttribute("data-theme");
 
     if (theme === "system" && enableSystem) {
       const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
@@ -48,12 +50,16 @@ export default function ThemeProvider({
         ? "dark"
         : "light";
 
+      // Set both class and data-theme attribute for better compatibility
       root.classList.add(systemTheme);
+      root.setAttribute("data-theme", systemTheme);
       return;
     }
 
+    // Set both class and data-theme attribute for the selected theme
     root.classList.add(theme);
-  }, [theme, enableSystem]);
+    root.setAttribute("data-theme", theme);
+  }, [theme, enableSystem, attribute]);
 
   const value = {
     theme,

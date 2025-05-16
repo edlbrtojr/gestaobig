@@ -11,7 +11,7 @@ interface GraphViewProps {
 
 // Mapping node types to colors
 const nodeColors: Record<string, string> = {
-  Risco: "#FF5252", // Red
+  Risco: "#F44336", // Red
   PlanoDeAcao: "#4CAF50", // Green
   Acao: "#2196F3", // Blue
   Estrategia: "#FFC107", // Amber
@@ -22,7 +22,7 @@ const nodeColors: Record<string, string> = {
   Projeto: "#3F51B5", // Indigo
   Objetivo: "#E91E63", // Pink
   KPI: "#795548", // Brown
-  Stakeholder: "#9E9E9E", // Gray
+  Stakeholder: "#BDBDBD", // Lighter Gray for better contrast with dark themes
   Tecnologia: "#00BCD4", // Cyan
   Produto: "#8BC34A", // Light Green
   Mercado: "#FFEB3B", // Yellow
@@ -30,7 +30,7 @@ const nodeColors: Record<string, string> = {
 };
 
 // Default color for unknown node types
-const defaultColor = "#607D8B"; // Gray
+const defaultColor = "#757575"; // Darker Gray for unknowns
 
 // Interface for categorized nodes
 interface CategorizedNodes {
@@ -39,6 +39,7 @@ interface CategorizedNodes {
 
 export default function GraphView({ data }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
   const [connectedNodes, setConnectedNodes] = useState<number[]>([]);
   const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>(
@@ -48,443 +49,610 @@ export default function GraphView({ data }: GraphViewProps) {
   const { theme } = useTheme();
 
   useEffect(() => {
-    if (!svgRef.current || !data.nodes.length) return;
+    if (!svgRef.current || !data.nodes.length) {
+      if (simulationRef.current) {
+        simulationRef.current.stop();
+        simulationRef.current = null;
+      }
+      if (svgRef.current) {
+        d3.select(svgRef.current).selectAll("*").remove();
+      }
+      return;
+    }
 
-    // Get theme colors
-    const backgroundColor = getComputedStyle(document.documentElement)
-      .getPropertyValue("--card-background")
-      .trim();
-    const textColor = getComputedStyle(document.documentElement)
-      .getPropertyValue("--foreground")
-      .trim();
-    const mutedColor = getComputedStyle(document.documentElement)
-      .getPropertyValue("--muted")
-      .trim();
-    const borderColor = getComputedStyle(document.documentElement)
-      .getPropertyValue("--card-border")
-      .trim();
+    if (simulationRef.current) {
+      simulationRef.current.stop();
+      simulationRef.current = null;
+    }
 
-    // Convert data to D3 compatible format
-    // Create a map of nodes by their ID for fast lookup
-    const nodeMap = new Map();
-    const nodes: D3Node[] = data.nodes.map((node) => {
-      // Extract the low part of Neo4j ID or use the ID directly if it's a number
-      const nodeId =
-        typeof node.id === "object" && node.id !== null ? node.id.low : node.id;
+    d3.select(svgRef.current).selectAll("*").remove();
 
-      const d3Node = {
-        ...node,
-        id: nodeId, // Use the extracted ID
+    const frameId = requestAnimationFrame(() => {
+      if (!svgRef.current) return;
+
+      const rawForegroundColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--foreground")
+        .trim();
+      const rawMutedForegroundColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--muted-foreground")
+        .trim();
+      const rawMutedColor = getComputedStyle(document.documentElement) // For link lines, borders etc.
+        .getPropertyValue("--muted")
+        .trim();
+      const rawBorderColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--border")
+        .trim();
+
+      // Define colors directly based on theme for critical D3 elements
+      // This bypasses potential issues with CSS var propagation into D3 if --foreground isn't updating as expected for D3
+      const d3TextColor = theme === "dark" ? "#FFFFFF" : "#0A0A0A"; // White for dark, near-black for light
+      const d3MutedForegroundColor = theme === "dark" ? "#A0A0A0" : "#707070"; // Lighter gray for dark, darker gray for light
+      const d3LinkColor = theme === "dark" ? "#606060" : "#C0C0C0"; // Visible gray for links in dark, lighter gray in light
+      const d3NodeBorderColor = `hsl(${rawBorderColor})`; // Keep using CSS var for less critical borders
+
+      const containerWidth =
+        svgRef.current!.parentElement?.clientWidth || window.innerWidth;
+      const containerHeight =
+        svgRef.current!.parentElement?.clientHeight || window.innerHeight;
+
+      const extractId = (id: any): number => {
+        if (id === null || id === undefined) return -1;
+        if (typeof id === "object" && "low" in id) return id.low;
+        return Number(id);
       };
 
-      // Store in map for relationship lookup
-      nodeMap.set(nodeId, d3Node);
+      const nodeMap = new Map();
+      const spiralPosition = (index: number, total: number) => {
+        const theta = index * 2.4;
+        const radiusScale = Math.min(containerWidth, containerHeight) * 0.2;
+        const radius = radiusScale * Math.sqrt(index / total);
+        return {
+          x: containerWidth / 2 + radius * Math.cos(theta),
+          y: containerHeight / 2 + radius * Math.sin(theta),
+        };
+      };
 
-      return d3Node;
-    });
+      const nodes: D3Node[] = data.nodes.map((node, i) => {
+        const nodeId = extractId(node.id);
+        const position = spiralPosition(i, data.nodes.length);
+        const d3Node = {
+          ...node,
+          id: nodeId,
+          x: position.x,
+          y: position.y,
+        };
+        nodeMap.set(nodeId, d3Node);
+        return d3Node;
+      });
 
-    // Process relationships to use the correct node references
-    const links: D3Link[] = data.relationships.map((rel) => {
-      // Extract the source and target IDs from Neo4j format
-      const sourceId =
-        typeof rel.source === "object" && rel.source !== null
-          ? rel.source.low
-          : rel.source;
-
-      const targetId =
-        typeof rel.target === "object" && rel.target !== null
-          ? rel.target.low
-          : rel.target;
-
-      return {
+      const links: D3Link[] = data.relationships.map((rel) => ({
         ...rel,
-        id: typeof rel.id === "object" && rel.id !== null ? rel.id.low : rel.id,
-        source: sourceId,
-        target: targetId,
-      };
-    });
+        id: extractId(rel.id),
+        source: extractId(rel.source),
+        target: extractId(rel.target),
+      }));
 
-    // Create a helper to find connected nodes
-    const getConnectedNodeIds = (nodeId: number): number[] => {
-      const connected = new Set<number>();
-
-      links.forEach((link) => {
+      const validLinks: D3Link[] = links.filter((rel) => {
         const sourceId =
-          typeof link.source === "object" ? link.source.id : link.source;
+          typeof rel.source === "object"
+            ? (rel.source as D3Node).id
+            : (rel.source as number);
         const targetId =
-          typeof link.target === "object" ? link.target.id : link.target;
-
-        if (sourceId === nodeId) {
-          connected.add(targetId);
-        } else if (targetId === nodeId) {
-          connected.add(sourceId);
-        }
+          typeof rel.target === "object"
+            ? (rel.target as D3Node).id
+            : (rel.target as number);
+        return nodeMap.has(sourceId) && nodeMap.has(targetId);
       });
 
-      return Array.from(connected);
-    };
-
-    // Categorize nodes by label
-    const categorizeNodes = () => {
-      const categorized: CategorizedNodes = {};
-
-      nodes.forEach((node) => {
-        if (!categorized[node.label]) {
-          categorized[node.label] = [];
-        }
-        categorized[node.label].push(node);
-      });
-
-      // Sort each category by name
-      Object.keys(categorized).forEach((category) => {
-        categorized[category].sort((a, b) =>
-          a.properties.name.localeCompare(b.properties.name)
+      const connectionCounts = new Map<number, number>();
+      nodes.forEach((node) => connectionCounts.set(node.id, 0));
+      validLinks.forEach((link) => {
+        const sourceId =
+          typeof link.source === "object"
+            ? (link.source as D3Node).id
+            : (link.source as number);
+        const targetId =
+          typeof link.target === "object"
+            ? (link.target as D3Node).id
+            : (link.target as number);
+        connectionCounts.set(
+          sourceId,
+          (connectionCounts.get(sourceId) || 0) + 1
+        );
+        connectionCounts.set(
+          targetId,
+          (connectionCounts.get(targetId) || 0) + 1
         );
       });
 
-      setCategorizedNodes(categorized);
-    };
+      const getNodeRadius = (nodeId: number): number => {
+        const connectionCount = connectionCounts.get(nodeId) || 0;
+        const minRadius = 10;
+        const maxRadius = 25;
+        const minConnections = 0;
+        const maxConnections = Math.max(
+          ...Array.from(connectionCounts.values())
+        );
+        if (maxConnections === minConnections) return minRadius;
+        return (
+          minRadius +
+          ((connectionCount - minConnections) * (maxRadius - minRadius)) /
+            (maxConnections - minConnections)
+        );
+      };
 
-    categorizeNodes();
+      const getConnectedNodeIds = (nodeId: number): number[] => {
+        const connected = new Set<number>();
+        validLinks.forEach((link) => {
+          const sourceId =
+            typeof link.source === "object"
+              ? (link.source as D3Node).id
+              : (link.source as number);
+          const targetId =
+            typeof link.target === "object"
+              ? (link.target as D3Node).id
+              : (link.target as number);
+          if (sourceId === nodeId) connected.add(targetId);
+          else if (targetId === nodeId) connected.add(sourceId);
+        });
+        return Array.from(connected);
+      };
 
-    // Clear previous svg content
-    d3.select(svgRef.current).selectAll("*").remove();
+      const internalCategorizeNodes = () => {
+        const categorized: CategorizedNodes = {};
+        nodes.forEach((node) => {
+          if (!categorized[node.label]) categorized[node.label] = [];
+          categorized[node.label].push(node);
+        });
+        Object.keys(categorized).forEach((category) => {
+          categorized[category].sort((a, b) =>
+            a.properties.name.localeCompare(b.properties.name)
+          );
+        });
+        setCategorizedNodes(categorized);
+      };
+      internalCategorizeNodes();
 
-    // Get the dimensions of the container - IMPORTANT: Get actual size, not just clientWidth
-    const containerWidth =
-      svgRef.current.parentElement?.clientWidth || window.innerWidth;
-    const containerHeight =
-      svgRef.current.parentElement?.clientHeight || window.innerHeight;
+      const svg = d3
+        .select(svgRef.current!)
+        .attr("width", containerWidth)
+        .attr("height", containerHeight);
+      const g = svg.append("g");
 
-    // Explicitly set SVG dimensions
-    const svg = d3
-      .select(svgRef.current)
-      .attr("width", containerWidth)
-      .attr("height", containerHeight)
-      .style("background", backgroundColor);
+      const zoom = d3
+        .zoom()
+        .scaleExtent([0.05, 10])
+        .on("zoom", (event) => {
+          g.attr("transform", event.transform);
+        });
+      svg.call(zoom as any);
+      const initialTransform = d3.zoomIdentity
+        .translate(containerWidth / 2, containerHeight / 2)
+        .scale(0.85);
+      svg.call(zoom.transform as any, initialTransform);
 
-    // Add zoom functionality
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.1, 4])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
+      const simulation = d3
+        .forceSimulation(nodes)
+        .force(
+          "link",
+          d3
+            .forceLink(validLinks)
+            .id((d: any) => d.id)
+            .distance(120)
+            .strength(0.5)
+        )
+        .force("charge", d3.forceManyBody().strength(-300))
+        .force(
+          "center",
+          d3.forceCenter(containerWidth / 2, containerHeight / 2).strength(0.05)
+        )
+        .force(
+          "collision",
+          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 25)
+        )
+        .alpha(0.6)
+        .alphaDecay(0.015);
+
+      simulation.on("tick", () => {
+        g.selectAll(".links line")
+          .attr("x1", (d: any) => {
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            return sourceNode?.x ?? 0; // Fallback to 0 if node not found
+          })
+          .attr("y1", (d: any) => {
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            return sourceNode?.y ?? 0; // Fallback to 0
+          })
+          .attr("x2", (d: any) => {
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            return targetNode?.x ?? 0; // Fallback to 0
+          })
+          .attr("y2", (d: any) => {
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            return targetNode?.y ?? 0; // Fallback to 0
+          });
+        g.selectAll(".links text")
+          .attr("x", (d: any) => {
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            return ((sourceNode?.x ?? 0) + (targetNode?.x ?? 0)) / 2;
+          })
+          .attr("y", (d: any) => {
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            return ((sourceNode?.y ?? 0) + (targetNode?.y ?? 0)) / 2;
+          });
+        g.selectAll(".nodes g").attr(
+          "transform",
+          (d: any) => `translate(${d.x ?? 0},${d.y ?? 0})`
+        );
       });
 
-    svg.call(zoom as any);
+      const linkElements = g
+        .append("g")
+        .attr("class", "links")
+        .selectAll("g")
+        .data(validLinks)
+        .enter()
+        .append("g");
 
-    // Create a container group for the graph
-    const g = svg.append("g");
+      linkElements
+        .append("line")
+        .attr("stroke", d3LinkColor) // Use d3LinkColor for link lines
+        .attr("stroke-opacity", 0.5)
+        .attr("stroke-width", 1.5)
+        .attr("marker-end", "url(#arrow)")
+        .attr("data-id", (d: D3Link) => d.id);
 
-    // Define forces
-    const simulation = d3
-      .forceSimulation(nodes)
-      .force(
-        "link",
-        d3
-          .forceLink(links)
-          .id((d: any) => d.id)
-          .distance(120) // Increased distance for better visibility
-      )
-      .force("charge", d3.forceManyBody().strength(-250)) // Increased repulsion
-      .force("center", d3.forceCenter(containerWidth / 2, containerHeight / 2))
-      .force("collision", d3.forceCollide().radius(40)); // Increased collision radius
+      svg
+        .append("defs")
+        .append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 28)
+        .attr("refY", 0)
+        .attr("markerWidth", 5)
+        .attr("markerHeight", 5)
+        .attr("orient", "auto-start-reverse")
+        .append("path")
+        .attr("fill", d3TextColor) // Use d3TextColor for arrowheads
+        .attr("d", "M0,-5L10,0L0,5");
 
-    // Create links (relationships)
-    const link = g
-      .append("g")
-      .attr("class", "links")
-      .selectAll("line")
-      .data(links)
-      .enter()
-      .append("g");
+      linkElements
+        .append("text")
+        .attr("font-size", "10px")
+        .attr("fill", d3TextColor) // Use d3TextColor for link labels
+        .attr("text-anchor", "middle")
+        .attr("dy", -4)
+        .attr("opacity", 0.7)
+        .text((d: D3Link) => d.type);
 
-    link
-      .append("line")
-      .attr("stroke", mutedColor)
-      .attr("stroke-opacity", 0.6)
-      .attr("stroke-width", 2)
-      .attr("marker-end", "url(#arrow)")
-      .attr("data-id", (d: D3Link) => d.id);
+      const drag = d3
+        .drag<Element, D3Node>()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        });
 
-    // Add arrow markers for directed edges
-    svg
-      .append("defs")
-      .append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 25) // Offset so arrow doesn't overlap with the node
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("fill", mutedColor)
-      .attr("d", "M0,-5L10,0L0,5");
+      const nodeElements = g
+        .append("g")
+        .attr("class", "nodes")
+        .selectAll("g")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .call(drag as any)
+        .attr("data-id", (d: D3Node) => d.id)
+        .attr("data-label", (d: D3Node) => d.label)
+        .attr("data-name", (d: D3Node) => d.properties.name)
+        .attr(
+          "data-connections",
+          (d: D3Node) => connectionCounts.get(d.id) || 0
+        );
 
-    // Add relationship type labels
-    const linkText = link
-      .append("text")
-      .attr("font-size", "11px")
-      .attr("fill", textColor)
-      .attr("text-anchor", "middle")
-      .attr("dy", -5)
-      .attr("opacity", 0.8)
-      .text((d: D3Link) => d.type);
+      const defs = svg.select("defs"); // Reuse or create defs
+      const filter = defs
+        .append("filter")
+        .attr("id", "node-shadow")
+        .attr("x", "-50%")
+        .attr("y", "-50%")
+        .attr("width", "200%")
+        .attr("height", "200%");
+      filter
+        .append("feGaussianBlur")
+        .attr("in", "SourceAlpha")
+        .attr("stdDeviation", 2.5)
+        .attr("result", "blur");
+      filter
+        .append("feOffset")
+        .attr("in", "blur")
+        .attr("dx", 0)
+        .attr("dy", 1)
+        .attr("result", "offsetBlur");
+      const feMerge = filter.append("feMerge");
+      feMerge.append("feMergeNode").attr("in", "offsetBlur");
+      feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    // Type the drag behavior to fix linting errors
-    const drag = d3
-      .drag<Element, D3Node>()
-      .on("start", (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      })
-      .on("drag", (event, d) => {
-        d.fx = event.x;
-        d.fy = event.y;
-      })
-      .on("end", (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+      nodeElements
+        .append("circle")
+        .attr("class", "node-circle")
+        .attr("r", (d: D3Node) => getNodeRadius(d.id))
+        .attr("fill", (d: D3Node) => nodeColors[d.label] || defaultColor)
+        .attr(
+          "stroke",
+          (d: D3Node) =>
+            d3
+              .color(nodeColors[d.label] || defaultColor)
+              ?.darker(0.7)
+              .toString() || d3NodeBorderColor
+        )
+        .attr("stroke-width", 1.5)
+        .style("filter", "url(#node-shadow)");
+
+      nodeElements
+        .append("text")
+        .attr("class", "node-name-text")
+        .attr("font-size", "10px")
+        .attr("font-weight", "500")
+        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 12)
+        .attr("text-anchor", "middle")
+        .attr("fill", d3TextColor) // Node names use d3TextColor
+        .style("pointer-events", "none")
+        .text((d: D3Node) =>
+          (d.properties?.name || `Node ${d.id}`).length > 15
+            ? (d.properties?.name || `Node ${d.id}`).substring(0, 13) + "..."
+            : d.properties?.name || `Node ${d.id}`
+        )
+        .append("title")
+        .text((d: D3Node) => d.properties?.name || `Node ${d.id}`);
+
+      nodeElements
+        .append("text")
+        .attr("class", "node-type-text")
+        .attr("font-size", "8px")
+        .attr("font-style", "italic")
+        .attr("dy", (d: D3Node) => -getNodeRadius(d.id) + 8)
+        .attr("text-anchor", "middle")
+        .attr("fill", d3MutedForegroundColor) // Node types use d3MutedForegroundColor
+        .style("pointer-events", "none")
+        .text((d: D3Node) => d.label || "Unknown");
+
+      nodeElements
+        .append("text")
+        .attr("class", "node-connection-count")
+        .attr("font-size", "10px")
+        .attr("font-weight", "bold")
+        .attr("text-anchor", "middle")
+        .attr("dy", (d: D3Node) => (getNodeRadius(d.id) > 15 ? 4 : 3))
+        .attr("fill", (d: D3Node) => {
+          const c = d3.hsl(nodeColors[d.label] || defaultColor);
+          return c && c.l > 0.55 ? "#000000" : "#FFFFFF";
+        })
+        .style("pointer-events", "none")
+        .text((d: D3Node) => connectionCounts.get(d.id) || 0);
+
+      nodeElements.each(function (d: D3Node) {
+        d3.select(this)
+          .append("title")
+          .text(
+            () =>
+              `${d.properties?.name || `Node ${d.id}`} (${
+                d.label || "Unknown"
+              })`
+          );
       });
 
-    // Create nodes
-    const node = g
-      .append("g")
-      .attr("class", "nodes")
-      .selectAll("circle")
-      .data(nodes)
-      .enter()
-      .append("g")
-      .call(drag as any)
-      .attr("data-id", (d: D3Node) => d.id);
+      nodeElements.on("click", (event: MouseEvent, d: D3Node) => {
+        event.stopPropagation();
+        const newlyConnected = getConnectedNodeIds(d.id);
+        setSelectedNode(d);
+        setConnectedNodes(newlyConnected);
+        setShowCategorized(true);
+        const t = d3.transition().duration(300);
+        nodeElements
+          .selectAll(".node-circle")
+          .transition(t)
+          .attr("opacity", 0.25)
+          .attr("stroke-width", 1);
+        nodeElements
+          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .transition(t)
+          .attr("opacity", 0.3);
+        linkElements
+          .selectAll("line")
+          .transition(t)
+          .attr("stroke-opacity", 0.15)
+          .attr("stroke-width", 1);
+        linkElements.selectAll("text").transition(t).attr("opacity", 0.15);
 
-    // Add a white background behind nodes for better visibility
-    node
-      .append("circle")
-      .attr("r", 14)
-      .attr("fill", backgroundColor)
-      .attr("stroke", borderColor)
-      .attr("stroke-width", 1);
+        const selectedSvgNode = d3.select(event.currentTarget as Element);
+        selectedSvgNode
+          .select(".node-circle")
+          .transition(t)
+          .attr("opacity", 1)
+          .attr("stroke-width", 2.5)
+          .attr("stroke", theme === "dark" ? "#FFFFFF" : "#000000");
+        selectedSvgNode
+          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .transition(t)
+          .attr("opacity", 1);
 
-    // Actual colored node
-    node
-      .append("circle")
-      .attr("r", 12)
-      .attr("fill", (d: D3Node) => nodeColors[d.label] || defaultColor)
-      .attr("stroke", backgroundColor)
-      .attr("stroke-width", 1.5);
+        nodeElements
+          .filter((n: D3Node) => newlyConnected.includes(n.id))
+          .selectAll(".node-circle")
+          .transition(t)
+          .attr("opacity", 0.9)
+          .attr("stroke-width", 2);
+        nodeElements
+          .filter((n: D3Node) => newlyConnected.includes(n.id))
+          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .transition(t)
+          .attr("opacity", 0.9);
 
-    // Add node labels with background for better readability
-    const labels = node.append("g").attr("class", "node-label");
+        linkElements
+          .filter(
+            (l: D3Link) =>
+              (typeof l.source === "object" ? l.source.id : l.source) ===
+                d.id ||
+              (typeof l.target === "object" ? l.target.id : l.target) === d.id
+          )
+          .selectAll("line")
+          .transition(t)
+          .attr("stroke-opacity", 0.8)
+          .attr("stroke-width", 2)
+          .attr("stroke", d3TextColor);
+        linkElements
+          .filter(
+            (l: D3Link) =>
+              (typeof l.source === "object" ? l.source.id : l.source) ===
+                d.id ||
+              (typeof l.target === "object" ? l.target.id : l.target) === d.id
+          )
+          .selectAll("text")
+          .transition(t)
+          .attr("opacity", 1)
+          .attr("font-weight", "bold");
+      });
 
-    // Text background
-    labels
-      .append("rect")
-      .attr("x", 15)
-      .attr("y", -7)
-      .attr("width", (d: D3Node) => d.properties.name.length * 6 + 4) // Approximate width based on text length
-      .attr("height", 16)
-      .attr("rx", 3)
-      .attr("fill", backgroundColor)
-      .attr("opacity", 0.8);
+      svg.on("click", () => {
+        setSelectedNode(null);
+        setConnectedNodes([]);
+        setShowCategorized(false);
+        const t = d3.transition().duration(300);
+        nodeElements
+          .selectAll(".node-circle")
+          .transition(t)
+          .attr("opacity", 1)
+          .attr(
+            "stroke",
+            (n: any) =>
+              d3
+                .color(nodeColors[n.label] || defaultColor)
+                ?.darker(0.7)
+                .toString() || d3NodeBorderColor
+          )
+          .attr("stroke-width", 1.5);
+        nodeElements
+          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .transition(t)
+          .attr("opacity", 1);
+        linkElements
+          .selectAll("line")
+          .transition(t)
+          .attr("stroke", d3LinkColor)
+          .attr("stroke-opacity", 0.5)
+          .attr("stroke-width", 1.5);
+        linkElements
+          .selectAll("text")
+          .transition(t)
+          .attr("fill", d3TextColor)
+          .attr("opacity", 0.7)
+          .attr("font-weight", "normal");
+      });
 
-    // Node name text
-    labels
-      .append("text")
-      .attr("font-size", "11px")
-      .attr("font-weight", "500")
-      .attr("dx", 17)
-      .attr("dy", 4)
-      .attr("fill", textColor)
-      .text((d: D3Node) => d.properties.name);
+      simulationRef.current = simulation;
+    }); // End of requestAnimationFrame
 
-    // Add node type labels above the node
-    node
-      .append("text")
-      .attr("font-size", "9px")
-      .attr("dx", 0)
-      .attr("dy", -18)
-      .attr("text-anchor", "middle")
-      .attr("fill", textColor)
-      .text((d: D3Node) => d.label);
-
-    // Handle node click events
-    node.on("click", (event: MouseEvent, d: D3Node) => {
-      event.stopPropagation();
-      const connected = getConnectedNodeIds(d.id);
-      setConnectedNodes(connected);
-      setSelectedNode(d);
-      setShowCategorized(true);
-
-      // Highlight the selected node and its connections
-      node
-        .selectAll("circle")
-        .attr("opacity", 0.3)
-        .attr("stroke", backgroundColor)
-        .attr("stroke-width", 1.5);
-
-      // Dim labels
-      node.selectAll(".node-label").attr("opacity", 0.3);
-
-      // Highlight the selected node
-      d3.select(event.currentTarget as Element)
-        .selectAll("circle")
-        .attr("opacity", 1)
-        .attr("stroke", "#000")
-        .attr("stroke-width", 2);
-
-      // Highlight selected node label
-      d3.select(event.currentTarget as Element)
-        .select(".node-label")
-        .attr("opacity", 1);
-
-      // Highlight connected nodes
-      node
-        .filter((n: D3Node) => connected.includes(n.id))
-        .selectAll("circle")
-        .attr("opacity", 1)
-        .attr("stroke", "#000")
-        .attr("stroke-width", 1.5);
-
-      // Highlight connected node labels
-      node
-        .filter((n: D3Node) => connected.includes(n.id))
-        .select(".node-label")
-        .attr("opacity", 1);
-
-      // Dim all links
-      link
-        .selectAll("line")
-        .attr("stroke-opacity", 0.1)
-        .attr("stroke-width", 1);
-
-      // Dim all link labels
-      link.selectAll("text").attr("opacity", 0.1);
-
-      // Highlight links connected to the selected node
-      link
-        .filter((l: D3Link) => {
-          const sourceId =
-            typeof l.source === "object" ? l.source.id : l.source;
-          const targetId =
-            typeof l.target === "object" ? l.target.id : l.target;
-          return sourceId === d.id || targetId === d.id;
-        })
-        .select("line")
-        .attr("stroke-opacity", 1)
-        .attr("stroke-width", 2)
-        .attr("stroke", "#000");
-
-      // Highlight link labels for connected links
-      link
-        .filter((l: D3Link) => {
-          const sourceId =
-            typeof l.source === "object" ? l.source.id : l.source;
-          const targetId =
-            typeof l.target === "object" ? l.target.id : l.target;
-          return sourceId === d.id || targetId === d.id;
-        })
-        .select("text")
-        .attr("opacity", 1)
-        .attr("font-weight", "bold");
-    });
-
-    // Clear selection when clicking on the background
-    svg.on("click", () => {
-      setSelectedNode(null);
-      setConnectedNodes([]);
-      setShowCategorized(false);
-
-      // Reset all visual states
-      node
-        .selectAll("circle")
-        .attr("opacity", 1)
-        .attr("stroke", backgroundColor)
-        .attr("stroke-width", 1.5);
-
-      node.selectAll(".node-label").attr("opacity", 1);
-
-      link
-        .selectAll("line")
-        .attr("stroke-opacity", 0.6)
-        .attr("stroke-width", 2)
-        .attr("stroke", mutedColor);
-
-      link.selectAll("text").attr("opacity", 0.8).attr("font-weight", "normal");
-    });
-
-    // Update positions on simulation tick
-    simulation.on("tick", () => {
-      link
-        .selectAll("line")
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
-
-      linkText
-        .attr("x", (d: any) => (d.source.x + d.target.x) / 2)
-        .attr("y", (d: any) => (d.source.y + d.target.y) / 2 - 5);
-
-      node.attr("transform", (d: any) => `translate(${d.x},${d.y})`);
-    });
-
-    // Cleanup
     return () => {
-      simulation.stop();
+      cancelAnimationFrame(frameId);
+      if (simulationRef.current) {
+        simulationRef.current.stop();
+      }
     };
-  }, [data, theme]); // Add theme as dependency to redraw when theme changes
+  }, [data, theme]); // Keep theme to re-render on theme change
 
   return (
-    <div className="flex flex-col h-full w-full relative">
+    <div className="flex flex-col h-full w-full relative isolate">
       <svg
         ref={svgRef}
-        className="w-full h-full bg-[var(--card-background)] text-[var(--foreground)]"
+        className="w-full h-full bg-background text-foreground"
         style={{
           position: "absolute",
           top: 0,
           left: 0,
           width: "100%",
           height: "100%",
-          overflow: "visible",
+          overflow: "hidden", // Keep overflow hidden on SVG itself
+          cursor: "grab",
         }}
+        preserveAspectRatio="xMidYMid meet"
       />
 
+      {/* Selected Node Details Panel */}
       {selectedNode && (
-        <div className="absolute bottom-4 right-4 p-6 bg-[var(--card-background)] shadow-lg rounded-lg max-w-sm z-10 border border-[var(--card-border)]">
-          <h3 className="text-lg font-semibold">
-            {selectedNode.properties.name}
-          </h3>
-          <p className="text-xs text-[var(--muted)] mb-2">
-            {selectedNode.label}
+        <div className="absolute bottom-5 right-5 p-4 bg-card text-card-foreground shadow-xl rounded-lg max-w-md w-full sm:w-auto z-20 border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInUp">
+          <div className="flex items-center justify-between mb-3">
+            <h3
+              className="text-lg font-semibold truncate pr-2"
+              title={selectedNode.properties?.name || `Node ${selectedNode.id}`}
+            >
+              {selectedNode.properties?.name || `Node ${selectedNode.id}`}
+            </h3>
             <span
-              className="inline-block w-3 h-3 rounded-full ml-2 align-middle"
+              className="inline-block w-4 h-4 rounded-full flex-shrink-0"
               style={{
                 backgroundColor: nodeColors[selectedNode.label] || defaultColor,
               }}
             ></span>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Tipo: {selectedNode.label || "Unknown"}
           </p>
-          <div className="mt-3 space-y-2">
-            {Object.entries(selectedNode.properties)
-              .filter(([key]) => key !== "name")
-              .map(([key, value]) => (
-                <div key={key} className="flex text-sm">
-                  <span className="font-medium mr-2 text-[var(--muted)]">
-                    {key}:
-                  </span>
-                  <span>{value}</span>
-                </div>
-              ))}
+          <div className="max-h-48 overflow-y-auto space-y-1.5 text-sm mb-3 pr-1 scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
+            {selectedNode.properties &&
+              Object.entries(selectedNode.properties)
+                .filter(([key]) => key !== "name") // Already shown in title
+                .map(([key, value]) => (
+                  <div key={key} className="flex ">
+                    <span className="font-medium mr-2 text-muted-foreground capitalize whitespace-nowrap">
+                      {key.replace(/_/g, " ")}:
+                    </span>
+                    <span className="truncate" title={String(value)}>
+                      {typeof value === "object" && value !== null
+                        ? JSON.stringify(value)
+                        : String(value)}
+                    </span>
+                  </div>
+                ))}
+          </div>
+          <div className="mt-2 pt-2 border-t border-border">
+            <span className="text-sm font-medium text-muted-foreground">
+              Conexões: {connectedNodes.length}
+            </span>
           </div>
           <button
-            className="mt-4 px-4 py-2 text-sm bg-[var(--muted-background)] hover:bg-[var(--card-border)] rounded-md transition-colors"
+            className="mt-4 w-full px-4 py-2 text-sm bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-card"
             onClick={() => {
-              setSelectedNode(null);
-              setConnectedNodes([]);
-              setShowCategorized(false);
+              // Simulate background click to reset everything
+              svgRef.current?.dispatchEvent(
+                new MouseEvent("click", { bubbles: true })
+              );
             }}
           >
             Fechar
@@ -492,9 +660,12 @@ export default function GraphView({ data }: GraphViewProps) {
         </div>
       )}
 
+      {/* Categorized/Connected Nodes Panel */}
       {showCategorized && (
-        <div className="absolute top-4 left-4 w-72 max-h-[80vh] overflow-auto bg-[var(--card-background)] shadow-lg rounded-lg p-6 z-10 border border-[var(--card-border)]">
-          <h3 className="text-lg font-semibold mb-3">Nós Conectados</h3>
+        <div className="absolute top-5 left-5 w-72 max-h-[calc(100vh-40px)] overflow-y-auto bg-card text-card-foreground shadow-xl rounded-lg p-4 z-20 border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInDown scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
+          <h3 className="text-base font-semibold mb-3 text-center">
+            Nós Próximos
+          </h3>
 
           {Object.entries(categorizedNodes)
             .filter(([_, nodes]) =>
@@ -515,32 +686,62 @@ export default function GraphView({ data }: GraphViewProps) {
               if (filteredNodes.length === 0) return null;
 
               return (
-                <div key={category} className="mb-4">
+                <div key={category} className="mb-3.5 last:mb-0">
                   <div
-                    className="flex items-center pb-2 mb-2 border-b"
+                    className="flex items-center pb-1.5 mb-1.5 border-b text-sm"
                     style={{
                       borderColor: nodeColors[category] || defaultColor,
                     }}
                   >
                     <span
-                      className="w-4 h-4 rounded-full mr-2"
+                      className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
                       style={{
                         backgroundColor: nodeColors[category] || defaultColor,
                       }}
                     ></span>
-                    <h4 className="font-medium">
+                    <h4 className="font-medium truncate" title={category}>
                       {category} ({filteredNodes.length})
                     </h4>
                   </div>
-                  <ul className="space-y-2 pl-5">
+                  <ul className="space-y-1 pl-1">
                     {filteredNodes.map((node) => (
                       <li
                         key={node.id}
-                        className={`text-sm hover:bg-[var(--muted-background)] px-2 py-1 rounded cursor-pointer transition-colors ${
+                        className={`text-xs truncate hover:bg-muted/50 px-2 py-1 rounded cursor-pointer transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
                           node.id === selectedNode?.id
-                            ? "font-bold bg-[var(--muted-background)]"
+                            ? "font-semibold bg-muted"
                             : ""
                         }`}
+                        title={node.properties.name}
+                        onClick={(e) => {
+                          // Find the corresponding SVG element and dispatch a click
+                          const nodeElement = d3
+                            .select(svgRef.current)
+                            .selectAll(".nodes g")
+                            .filter((d: any) => d.id === node.id)
+                            .node() as SVGElement | null;
+                          if (nodeElement) {
+                            nodeElement.dispatchEvent(
+                              new MouseEvent("click", { bubbles: true })
+                            );
+                          }
+                          e.stopPropagation(); // Prevent triggering SVG background click
+                        }}
+                        tabIndex={0} // Make it focusable
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            const nodeElement = d3
+                              .select(svgRef.current)
+                              .selectAll(".nodes g")
+                              .filter((d: any) => d.id === node.id)
+                              .node() as SVGElement | null;
+                            if (nodeElement) {
+                              nodeElement.dispatchEvent(
+                                new MouseEvent("click", { bubbles: true })
+                              );
+                            }
+                          }
+                        }}
                       >
                         {node.properties.name}
                       </li>
@@ -549,13 +750,6 @@ export default function GraphView({ data }: GraphViewProps) {
                 </div>
               );
             })}
-
-          <button
-            className="mt-4 w-full px-4 py-2 text-sm bg-[var(--muted-background)] hover:bg-[var(--card-border)] rounded-md transition-colors"
-            onClick={() => setShowCategorized(false)}
-          >
-            Fechar
-          </button>
         </div>
       )}
     </div>

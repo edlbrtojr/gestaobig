@@ -7,10 +7,47 @@ export default function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
+  // Determine the actual theme accounting for system preference
+  const [actualTheme, setActualTheme] = useState<"dark" | "light">(
+    theme === "dark" ? "dark" : "light"
+  );
+
+  // Update actual theme based on system preference when in system mode
+  useEffect(() => {
+    if (theme === "system") {
+      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
+        .matches
+        ? "dark"
+        : "light";
+      setActualTheme(systemTheme);
+
+      // Listen for changes in system theme
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const handleChange = (e: MediaQueryListEvent) => {
+        setActualTheme(e.matches ? "dark" : "light");
+      };
+
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    } else {
+      setActualTheme(theme as "dark" | "light");
+    }
+  }, [theme]);
+
   // Avoid hydration mismatch
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const toggleTheme = () => {
+    if (theme === "system") {
+      // If in system mode, set to opposite of current system theme
+      setTheme(actualTheme === "dark" ? "light" : "dark");
+    } else {
+      // Toggle between light and dark
+      setTheme(theme === "dark" ? "light" : "dark");
+    }
+  };
 
   if (!mounted) {
     return <div className="w-10 h-10"></div>;
@@ -18,18 +55,30 @@ export default function ThemeToggle() {
 
   return (
     <button
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="w-10 h-10 flex items-center justify-center rounded-md border border-[var(--card-border)] bg-[var(--card-background)] text-[var(--foreground)] hover:bg-[var(--muted-background)]"
-      aria-label="Toggle theme"
+      onClick={toggleTheme}
+      className={`
+        w-10 h-10 flex items-center justify-center rounded-md border 
+        border-[var(--card-border)] bg-[var(--card-background)] text-[var(--foreground)]
+        hover:bg-[var(--muted-background)] transition-all
+        ${actualTheme === "dark" ? "shadow-inner" : ""}
+      `}
+      aria-label={`Switch to ${
+        actualTheme === "dark" ? "light" : "dark"
+      } theme`}
+      title={`Current: ${
+        theme === "system"
+          ? "System"
+          : theme.charAt(0).toUpperCase() + theme.slice(1)
+      } theme`}
     >
-      {theme === "dark" ? (
+      {actualTheme === "dark" ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
           strokeWidth={1.5}
           stroke="currentColor"
-          className="w-5 h-5"
+          className="w-5 h-5 text-[var(--primary)]"
         >
           <path
             strokeLinecap="round"
@@ -44,7 +93,7 @@ export default function ThemeToggle() {
           viewBox="0 0 24 24"
           strokeWidth={1.5}
           stroke="currentColor"
-          className="w-5 h-5"
+          className="w-5 h-5 text-[var(--primary)]"
         >
           <path
             strokeLinecap="round"
