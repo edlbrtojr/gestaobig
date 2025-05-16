@@ -318,10 +318,10 @@ export default function AddForm({ onAdd }: AddFormProps) {
   // Update node properties when label changes
   useEffect(() => {
     if (nodeFormData.label && NODE_TYPES_CONFIG[nodeFormData.label]) {
-      setNodeFormData({
-        ...nodeFormData,
+      setNodeFormData((prevData) => ({
+        ...prevData,
         properties: { ...NODE_TYPES_CONFIG[nodeFormData.label].properties },
-      });
+      }));
     }
   }, [nodeFormData.label]);
 
@@ -354,6 +354,16 @@ export default function AddForm({ onAdd }: AddFormProps) {
         type: "error",
       });
     }
+  };
+
+  const handlePropertyChange = (key: string, value: string) => {
+    setNodeFormData({
+      ...nodeFormData,
+      properties: {
+        ...nodeFormData.properties,
+        [key]: value,
+      },
+    });
   };
 
   const handleAddCustomProperty = () => {
@@ -429,26 +439,43 @@ export default function AddForm({ onAdd }: AddFormProps) {
         throw new Error(data.error || "Falha ao adicionar nó");
       }
 
-      // Reset form
-      setNodeFormData({
-        name: "",
-        label: NODE_TYPES[0],
-        properties: { ...NODE_TYPES_CONFIG[NODE_TYPES[0]].properties },
-      });
+      // Refresh list of nodes first to ensure the new node is available
+      await fetchExistingNodes();
 
       setMessage({
-        text: "Nó adicionado com sucesso!",
+        text: "Nó adicionado com sucesso! Adicione um relacionamento.",
         type: "success",
       });
-
-      // Refresh list of nodes
-      await fetchExistingNodes();
 
       // Call onAdd callback if provided
       if (onAdd) onAdd();
 
       // Refresh the page data
       router.refresh();
+
+      // Pre-fill relationship form with the new node as source
+      if (data.node) {
+        const newNode = data.node;
+        const newNodeId =
+          newNode.id?.low !== undefined ? newNode.id.low : newNode.id;
+
+        setRelationshipFormData({
+          source: String(newNodeId),
+          sourceType: newNode.label || "",
+          target: "",
+          targetType: "",
+          type: "", // This will be repopulated by the useEffect based on sourceType
+          properties: {},
+        });
+        setIsAddingNode(false); // Switch to relationship form
+      }
+
+      // Reset node form (even though we are switching, it's good practice)
+      setNodeFormData({
+        name: "",
+        label: NODE_TYPES[0],
+        properties: { ...NODE_TYPES_CONFIG[NODE_TYPES[0]].properties },
+      });
     } catch (error) {
       console.error("Error adding node:", error);
       setMessage({
@@ -679,22 +706,57 @@ export default function AddForm({ onAdd }: AddFormProps) {
                 Propriedades Padrão
               </label>
               <div className="space-y-3">
-                {Object.entries(nodeFormData.properties).map(([key, value]) => {
+                {Object.entries(
+                  NODE_TYPES_CONFIG[nodeFormData.label]?.properties || {}
+                ).map(([key, defaultValue]) => {
                   const inputType = getInputType(key, nodeFormData.label);
                   const options = getOptions(key, nodeFormData.label);
+                  const currentValue =
+                    nodeFormData.properties[key] ?? defaultValue ?? "";
 
                   return (
-                    <div key={key} className="flex items-center space-x-2">
-                      <div className="flex-1 p-2 border border-[var(--card-border)] rounded-md bg-[var(--muted-background)]">
-                        <span className="font-medium">{key}:</span> {value}
-                      </div>
-                      <button
-                        type="button"
-                        className="p-1 text-[var(--danger)]"
-                        onClick={() => handleRemoveCustomProperty(key)}
+                    <div key={key} className="space-y-1">
+                      <label
+                        htmlFor={`prop-${key}`}
+                        className="block text-xs font-medium text-[var(--muted-foreground)] capitalize"
                       >
-                        ✕
-                      </button>
+                        {key.replace(/_/g, " ")}
+                      </label>
+                      {inputType === "select" ? (
+                        <select
+                          id={`prop-${key}`}
+                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
+                          value={currentValue}
+                          onChange={(e) =>
+                            handlePropertyChange(key, e.target.value)
+                          }
+                        >
+                          {options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      ) : inputType === "textarea" ? (
+                        <textarea
+                          id={`prop-${key}`}
+                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)] min-h-[60px]"
+                          value={currentValue}
+                          onChange={(e) =>
+                            handlePropertyChange(key, e.target.value)
+                          }
+                        />
+                      ) : (
+                        <input
+                          id={`prop-${key}`}
+                          type={inputType}
+                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
+                          value={currentValue}
+                          onChange={(e) =>
+                            handlePropertyChange(key, e.target.value)
+                          }
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -740,6 +802,42 @@ export default function AddForm({ onAdd }: AddFormProps) {
                       +
                     </button>
                   </div>
+                  {/* Display custom properties for editing/removal */}
+                  {Object.entries(nodeFormData.properties)
+                    .filter(
+                      ([key]) =>
+                        !(
+                          key in
+                          (NODE_TYPES_CONFIG[nodeFormData.label]?.properties ||
+                            {})
+                        )
+                    )
+                    .map(([key, value]) => (
+                      <div
+                        key={`custom-${key}`}
+                        className="flex items-center space-x-2 p-2 border border-dashed border-[var(--card-border)] rounded-md bg-[var(--muted-background)]/50"
+                      >
+                        <span className="font-medium text-sm capitalize flex-1">
+                          {key.replace(/_/g, " ")}:
+                        </span>
+                        <input
+                          type="text"
+                          className="flex-1 p-1.5 border border-[var(--card-border)] rounded-md bg-[var(--background)] text-sm"
+                          value={String(value)}
+                          onChange={(e) =>
+                            handlePropertyChange(key, e.target.value)
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="p-1 text-[var(--danger)] hover:text-[var(--danger-hover)]"
+                          onClick={() => handleRemoveCustomProperty(key)}
+                          title={`Remover ${key}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
                 </div>
               )}
             </div>
