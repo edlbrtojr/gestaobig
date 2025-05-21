@@ -246,9 +246,9 @@ export default function NodeEditForm({
     <>
       <form
         onSubmit={handleSubmit}
-        className="space-y-4 max-h-[calc(100vh-250px)] overflow-y-auto pr-2"
+        className="space-y-4 max-h-[calc(100vh-250px)] overflow-y-auto pr-2 w-70"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 pl-2">
           {Object.entries(editedProperties).map(([key, value]) => {
             const formattedValue = formatValueForEditing(value);
             return (

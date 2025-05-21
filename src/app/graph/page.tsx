@@ -43,8 +43,10 @@ export default function GraphPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  // Add selectedNode state
+  // Node selection states
   const [selectedNode, setSelectedNode] = useState<any>(null);
+  // Add relationship selection state
+  const [selectedRelationship, setSelectedRelationship] = useState<any>(null);
   // Add nodeConnections state to track connections of the selected node
   const [nodeConnections, setNodeConnections] = useState<
     Array<{
@@ -303,6 +305,8 @@ export default function GraphPage() {
   const handleNodeSelected = useCallback(
     (node: any) => {
       setSelectedNode(node);
+      // Clear any selected relationship when a node is selected
+      setSelectedRelationship(null);
 
       // Find all connections (relationships) for this node
       if (node && graphData.relationships.length > 0) {
@@ -355,6 +359,17 @@ export default function GraphPage() {
       }
     },
     [graphData, extractNodeId, extractRelationshipIds]
+  );
+
+  // Handle relationship selection in the graph
+  const handleRelationshipSelected = useCallback(
+    (relationship: any) => {
+      setSelectedRelationship(relationship);
+      // Clear any selected node when a relationship is selected
+      setSelectedNode(null);
+      setNodeConnections([]);
+    },
+    []
   );
 
   // Get unique node types for filter controls
@@ -464,7 +479,7 @@ export default function GraphPage() {
                 </div>
               </div>
 
-              <div className="lg:col-span-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden h-[70vh] relative">
+              <div className="lg:col-span-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden h-[83vh] relative">
                 {/* Loading overlay with blur effect */}
                 {isLoading && (
                   <div className="absolute inset-0 backdrop-blur-sm bg-white/50 dark:bg-gray-900/50 z-10 flex items-center justify-center">
@@ -479,6 +494,7 @@ export default function GraphPage() {
                 <GraphContainer
                   data={filteredData}
                   onNodeSelected={handleNodeSelected}
+                  onRelationshipSelected={handleRelationshipSelected}
                 />
               </div>
             </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { runQuery } from "@/lib/neo4j";
+import { executeRead } from "@/lib/neo4j";
+import { QueryResult } from "neo4j-driver";
 
 /**
  * GET handler for /api/graph endpoint
@@ -31,13 +32,13 @@ export async function GET() {
 
     // Run both queries in parallel for efficiency
     const [nodesResult, relationshipsResult] = await Promise.all([
-      runQuery(nodesQuery),
-      runQuery(relationshipsQuery),
+      executeRead<QueryResult>(nodesQuery),
+      executeRead<QueryResult>(relationshipsQuery),
     ]);
 
     // Extract the data from the results
-    const nodes = nodesResult[0]?.get("nodes") || [];
-    const relationships = relationshipsResult[0]?.get("relationships") || [];
+    const nodes = nodesResult.records[0]?.get("nodes") || [];
+    const relationships = relationshipsResult.records[0]?.get("relationships") || [];
 
     // Return the graph data as JSON
     return NextResponse.json({ nodes, relationships });

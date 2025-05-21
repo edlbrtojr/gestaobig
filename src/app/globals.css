@@ -372,6 +372,17 @@ body {
   justify-content: center;
 }
 
+/* Center active highlight on sidebar buttons */
+[data-sidebar="menu-button"][data-active="true"] {
+  position: relative;
+  z-index: 1;
+}
+
+/* Make sure the highlight is centered, especially in collapsed state */
+[data-state="collapsed"] [data-sidebar="menu-button"][data-active="true"] {
+  background-position: center;
+}
+
 /* Add specific CSS to ensure sidebar menu text is always visible in expanded state */
 [data-state="expanded"] [data-sidebar="menu-button"] span {
   display: inline-block !important;

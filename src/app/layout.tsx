@@ -60,8 +60,8 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <SidebarProvider defaultOpen={false}>
-            <div className="flex h-screen w-full overflow-hidden bg-background">
-              <AppSidebar />
+            <div className="flex h-screen w-full overflow-hidden bg-background relative">
+              <AppSidebar className="z-50" />
 
               <SidebarInset className="flex flex-col flex-1 w-full">
                 <SiteHeader />

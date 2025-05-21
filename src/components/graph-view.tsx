@@ -6,6 +6,7 @@ import { D3Node, D3Link, GraphData } from "@/types/graph";
 import { useTheme } from "./theme-provider";
 import { Pencil, Save, X, GitBranch, Shield, Compass } from "lucide-react";
 import NodeEditForm from "@/components/node-edit-form";
+import RelationshipEditForm from "@/components/relationship-edit-form";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 interface GraphViewProps {
   data: GraphData;
   onNodeSelected?: (node: any) => void;
+  onRelationshipSelected?: (relationship: any) => void;
 }
 
 // Mapping node types to colors
@@ -69,22 +71,47 @@ interface CategorizedNodes {
   [category: string]: D3Node[];
 }
 
-export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
+// Helper function to format property values for display
+const formatValue = (value: any): string => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  
+  // Handle Neo4j integer objects
+  if (typeof value === "object" && value !== null && "low" in value && "high" in value) {
+    return value.low.toString();
+  }
+  
+  // Handle other objects by converting to JSON
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  
+  // Return string representation for other types
+  return String(value);
+};
+
+export default function GraphView({ 
+  data, 
+  onNodeSelected,
+  onRelationshipSelected 
+}: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
+  const [selectedRelationship, setSelectedRelationship] = useState<D3Link | null>(null);
   const [connectedNodes, setConnectedNodes] = useState<number[]>([]);
-  const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>(
-    {}
-  );
+  const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>({});
   const [showCategorized, setShowCategorized] = useState(false);
   const { theme, resolvedTheme } = useTheme();
   const [initialized, setInitialized] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingRelationship, setIsEditingRelationship] = useState(false);
   const [formChanged, setFormChanged] = useState(false);
   const [showExitConfirmation, setShowExitConfirmation] = useState(false);
   const dataRef = useRef(data); // Store previous data reference
   const renderingRef = useRef(false); // Track if we're currently rendering
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Use memo for expensive graph data processing
   const [processedData, nodeMap] = useMemo(() => {
@@ -161,6 +188,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
 
         // Reset any selected state when data changes
         setSelectedNode(null);
+        setSelectedRelationship(null);
         setConnectedNodes([]);
         setShowCategorized(false);
 
@@ -464,15 +492,94 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
 
       linkElements
         .append("line")
-        .attr("stroke", d3LinkColor) // Use d3LinkColor for link lines
-        .attr("stroke-opacity", 0) // Start invisible
+        .attr("stroke", d3LinkColor)
+        .attr("stroke-opacity", 0)
         .attr("stroke-width", 1.5)
         .attr("marker-end", "url(#arrow)")
         .attr("data-id", (d: D3Link) => d.id)
-        .transition() // Add transition to fade lines in
-        .delay(800) // Delay after nodes appear
+        .style("cursor", "pointer")
+        .on("click", (event: MouseEvent, d: D3Link) => {
+          event.stopPropagation();
+          // Reset node selection and edit states
+          setSelectedNode(null);
+          setConnectedNodes([]);
+          setIsEditing(false);
+          // Set relationship selection
+          setSelectedRelationship(d);
+          setIsEditingRelationship(false);
+          if (onRelationshipSelected) {
+            onRelationshipSelected(d);
+          }
+          
+          // Highlight only this relationship and its connected nodes
+          const t = d3.transition().duration(300);
+          const { textColor } = getThemeColors();
+          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
+          const targetId = typeof d.target === "object" ? d.target.id : d.target;
+
+          // Dim all nodes
+          g.selectAll(".nodes g")
+            .selectAll(".node-circle")
+            .transition(t)
+            .attr("opacity", 0.25)
+            .attr("stroke-width", 1);
+          
+          g.selectAll(".nodes g")
+            .selectAll(".node-name-text, .node-type-text")
+            .transition(t)
+            .attr("opacity", 0.3);
+
+          // Dim all relationships
+          g.selectAll(".links line")
+            .transition(t)
+            .attr("stroke-opacity", 0.15)
+            .attr("stroke-width", 1);
+          
+          g.selectAll(".links text")
+            .transition(t)
+            .attr("opacity", 0.15);
+
+          // Highlight the relationship line (in same group as the text)
+          const parentElement = (event.currentTarget as Element).parentNode as Element;
+          if (parentElement) {
+            d3.select(parentElement)
+              .select("line")
+              .transition(t)
+              .attr("stroke-opacity", 1)
+              .attr("stroke-width", 2.5)
+              .attr("stroke", textColor);
+          }
+          
+          // Highlight this relationship text
+          d3.select(event.currentTarget as Element)
+            .transition(t)
+            .attr("opacity", 1)
+            .attr("font-weight", "bold")
+            .attr("fill", textColor);
+
+          // Highlight the connected nodes
+          g.selectAll(".nodes g")
+            .filter(function(d: any) { 
+              return d.id === sourceId || d.id === targetId;
+            })
+            .selectAll(".node-circle")
+            .transition(t)
+            .attr("opacity", 1)
+            .attr("stroke-width", 2)
+            .attr("stroke", textColor);
+          
+          g.selectAll(".nodes g")
+            .filter(function(d: any) { 
+              return d.id === sourceId || d.id === targetId;
+            })
+            .selectAll(".node-name-text, .node-type-text")
+            .transition(t)
+            .attr("opacity", 1);
+        })
+        .transition()
+        .delay(800)
         .duration(500)
-        .attr("stroke-opacity", 0.5); // Fade in to 50% opacity
+        .attr("stroke-opacity", 0.5);
 
       svg
         .append("defs")
@@ -485,21 +592,101 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
         .attr("markerHeight", 5)
         .attr("orient", "auto-start-reverse")
         .append("path")
-        .attr("fill", d3TextColor) // Use d3TextColor for arrowheads
+        .attr("fill", d3TextColor)
         .attr("d", "M0,-5L10,0L0,5");
 
       linkElements
         .append("text")
-        .attr("font-size", "10px")
-        .attr("fill", d3TextColor) // Use d3TextColor for link labels
-        .attr("text-anchor", "middle")
-        .attr("dy", -4)
-        .attr("opacity", 0) // Start invisible
         .text((d: D3Link) => d.type)
-        .transition() // Add transition to fade in link text
-        .delay(1000) // Delay after lines appear
+        .attr("font-size", "9px")
+        .attr("text-anchor", "middle")
+        .attr("dy", "-5")
+        .attr("fill", textColor)
+        .attr("opacity", 0)
+        .style("pointer-events", "all")
+        .style("cursor", "pointer")
+        .on("click", (event: MouseEvent, d: D3Link) => {
+          event.stopPropagation();
+          // Reset node selection and edit states
+          setSelectedNode(null);
+          setConnectedNodes([]);
+          setIsEditing(false);
+          // Set relationship selection
+          setSelectedRelationship(d);
+          setIsEditingRelationship(false);
+          if (onRelationshipSelected) {
+            onRelationshipSelected(d);
+          }
+          
+          // Highlight only this relationship and its connected nodes
+          const t = d3.transition().duration(300);
+          const { textColor } = getThemeColors();
+          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
+          const targetId = typeof d.target === "object" ? d.target.id : d.target;
+
+          // Dim all nodes
+          g.selectAll(".nodes g")
+            .selectAll(".node-circle")
+            .transition(t)
+            .attr("opacity", 0.25)
+            .attr("stroke-width", 1);
+          
+          g.selectAll(".nodes g")
+            .selectAll(".node-name-text, .node-type-text")
+            .transition(t)
+            .attr("opacity", 0.3);
+
+          // Dim all relationships
+          g.selectAll(".links line")
+            .transition(t)
+            .attr("stroke-opacity", 0.15)
+            .attr("stroke-width", 1);
+          
+          g.selectAll(".links text")
+            .transition(t)
+            .attr("opacity", 0.15);
+
+          // Highlight the relationship line (in same group as the text)
+          const parentElement = (event.currentTarget as Element).parentNode as Element;
+          if (parentElement) {
+            d3.select(parentElement)
+              .select("line")
+              .transition(t)
+              .attr("stroke-opacity", 1)
+              .attr("stroke-width", 2.5)
+              .attr("stroke", textColor);
+          }
+          
+          // Highlight this relationship text
+          d3.select(event.currentTarget as Element)
+            .transition(t)
+            .attr("opacity", 1)
+            .attr("font-weight", "bold")
+            .attr("fill", textColor);
+
+          // Highlight the connected nodes
+          g.selectAll(".nodes g")
+            .filter(function(d: any) { 
+              return d.id === sourceId || d.id === targetId;
+            })
+            .selectAll(".node-circle")
+            .transition(t)
+            .attr("opacity", 1)
+            .attr("stroke-width", 2)
+            .attr("stroke", textColor);
+          
+          g.selectAll(".nodes g")
+            .filter(function(d: any) { 
+              return d.id === sourceId || d.id === targetId;
+            })
+            .selectAll(".node-name-text, .node-type-text")
+            .transition(t)
+            .attr("opacity", 1);
+        })
+        .transition()
+        .delay(1000)
         .duration(500)
-        .attr("opacity", 0.7); // Fade to 70% opacity
+        .attr("opacity", 0.7);
 
       const drag = d3
         .drag<Element, D3Node>()
@@ -534,7 +721,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
           (d: D3Node) => connectionCounts.get(d.id) || 0
         );
 
-      const defs = svg.select("defs"); // Reuse or create defs
+      const defs = svg.select("defs");
       const filter = defs
         .append("filter")
         .attr("id", "node-shadow")
@@ -560,7 +747,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
       nodeElements
         .append("circle")
         .attr("class", "node-circle")
-        .attr("r", 0) // Start with radius 0
+        .attr("r", 0)
         .attr("fill", (d: D3Node) => nodeColors[d.label] || defaultColor)
         .attr(
           "stroke",
@@ -572,62 +759,57 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
         )
         .attr("stroke-width", 1.5)
         .style("filter", "url(#node-shadow)")
-        .transition() // Add transition for circle expansion
-        .duration(1000) // 1 second animation
-        .ease(d3.easeElasticOut.amplitude(0.5)) // Elastic animation that slows down
-        .attr("r", (d: D3Node) => getNodeRadius(d.id)); // Expand to final radius
+        .transition()
+        .duration(1000)
+        .ease(d3.easeElasticOut.amplitude(0.5))
+        .attr("r", (d: D3Node) => getNodeRadius(d.id));
 
-      // Add transition for labels to fade in after circles expand
       nodeElements
         .append("text")
         .attr("class", "node-name-text")
-        .attr("font-size", "9px") // Slightly smaller to fit inside nodes
-        .attr("font-weight", "600") // Increased from 500 for better visibility inside nodes
-        .attr("dy", "0.3em") // Center vertically inside the node
+        .attr("font-size", "9px")
+        .attr("font-weight", "600")
+        .attr("dy", "0.3em")
         .attr("text-anchor", "middle")
         .attr("fill", (d: D3Node) => {
-          // Determine text color based on background color brightness
           const c = d3.hsl(nodeColors[d.label] || defaultColor);
           return c && c.l > 0.55 ? "#000000" : "#FFFFFF";
         })
         .style("pointer-events", "none")
-        .style("opacity", 0) // Start invisible
+        .style("opacity", 0)
         .text((d: D3Node) => {
           const name = d.properties?.name || `Node ${d.id}`;
-          // Truncate text based on node size to fit inside
           const radius = getNodeRadius(d.id);
-          const maxLength = Math.max(3, Math.floor(radius * 0.7)); // Dynamic length based on radius
+          const maxLength = Math.max(3, Math.floor(radius * 0.7));
           return name.length > maxLength
             ? name.substring(0, maxLength - 3) + "..."
             : name;
         })
         .each(function (d: D3Node) {
-          // Append title before transition
           d3.select(this)
             .append("title")
             .text(d.properties?.name || `Node ${d.id}`);
         })
-        .transition() // Add transition for text fade-in
-        .delay(600) // Wait a bit before showing text
+        .transition()
+        .delay(600)
         .duration(800)
-        .style("opacity", 1); // Fade in
+        .style("opacity", 1);
 
-      // Node type text now positioned below the node instead of above
       nodeElements
         .append("text")
         .attr("class", "node-type-text")
         .attr("font-size", "8px")
         .attr("font-style", "italic")
-        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 14) // Moved below node
+        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 14)
         .attr("text-anchor", "middle")
         .attr("fill", d3MutedForegroundColor)
         .style("pointer-events", "none")
-        .style("opacity", 0) // Start invisible
+        .style("opacity", 0)
         .text((d: D3Node) => d.label || "Unknown")
-        .transition() // Add transition for text fade-in
-        .delay(700) // Wait a bit longer for type text
+        .transition()
+        .delay(700)
         .duration(800)
-        .style("opacity", 1); // Fade in
+        .style("opacity", 1);
 
       nodeElements.each(function (d: D3Node) {
         d3.select(this)
@@ -643,18 +825,21 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
       nodeElements.on("click", (event: MouseEvent, d: D3Node) => {
         event.stopPropagation();
         const newlyConnected = getConnectedNodeIds(d.id);
+        // Reset relationship selection and edit states
+        setSelectedRelationship(null);
+        setIsEditingRelationship(false);
+        // Set node selection
         setSelectedNode(d);
         setConnectedNodes(newlyConnected);
         setShowCategorized(true);
+        setIsEditing(false);
 
-        // Call the onNodeSelected callback if provided
         if (onNodeSelected) {
           onNodeSelected(d);
         }
 
         const t = d3.transition().duration(300);
 
-        // Get current theme-appropriate colors
         const { textColor } = getThemeColors();
 
         nodeElements
@@ -679,7 +864,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
           .transition(t)
           .attr("opacity", 1)
           .attr("stroke-width", 2.5)
-          .attr("stroke", textColor); // Use theme-appropriate color
+          .attr("stroke", textColor);
         selectedSvgNode
           .selectAll(".node-name-text, .node-type-text")
           .transition(t)
@@ -708,7 +893,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
           .transition(t)
           .attr("stroke-opacity", 0.8)
           .attr("stroke-width", 2)
-          .attr("stroke", textColor); // Use theme-appropriate color
+          .attr("stroke", textColor);
         linkElements
           .filter(
             (l: D3Link) =>
@@ -720,22 +905,23 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
           .transition(t)
           .attr("opacity", 1)
           .attr("font-weight", "bold")
-          .attr("fill", textColor); // Use theme-appropriate color
+          .attr("fill", textColor);
       });
 
       svg.on("click", () => {
         setSelectedNode(null);
+        setSelectedRelationship(null);
         setConnectedNodes([]);
         setShowCategorized(false);
+        setIsEditing(false);
+        setIsEditingRelationship(false);
 
-        // Call the onNodeSelected callback with null when no node is selected
         if (onNodeSelected) {
           onNodeSelected(null);
         }
 
         const t = d3.transition().duration(300);
 
-        // Get current theme-appropriate colors
         const { textColor, linkColor } = getThemeColors();
 
         const nodeElements = d3.select(svgRef.current).selectAll(".nodes g");
@@ -772,9 +958,8 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
 
       simulationRef.current = simulation;
 
-      // Mark as initialized after the graph has been rendered
       setInitialized(true);
-    }); // End of requestAnimationFrame
+    });
 
     return () => {
       cancelAnimationFrame(frameId);
@@ -784,36 +969,27 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
     };
   }, [data, theme, resolvedTheme, initialized]);
 
-  // Effect to update text colors when theme changes but graph is already rendered
   useEffect(() => {
     if (!initialized || !svgRef.current) return;
 
-    // Update colors for existing elements without rebuilding the entire graph
     const updateThemeColors = () => {
       const { textColor, mutedForegroundColor, linkColor } = getThemeColors();
 
       const svg = d3.select(svgRef.current!);
 
-      // Update link text colors
       svg.selectAll(".links text").attr("fill", textColor);
 
-      // Update node text colors
       svg.selectAll(".node-name-text").attr("fill", textColor);
 
-      // Update node type text colors
       svg.selectAll(".node-type-text").attr("fill", mutedForegroundColor);
 
-      // Update arrow marker colors
       svg.select("#arrow path").attr("fill", textColor);
 
-      // Update link line colors
       svg.selectAll(".links line").attr("stroke", linkColor);
     };
 
-    // Use requestAnimationFrame to ensure the DOM is ready
     requestAnimationFrame(updateThemeColors);
 
-    // Set up mutation observer to detect theme class changes on document element
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (
@@ -836,19 +1012,98 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
     };
   }, [theme, resolvedTheme, initialized]);
 
-  // Add this function to handle node updates
   const handleNodeUpdate = async (updatedNode: any) => {
     setIsEditing(false);
-    // Update the local state and trigger a re-render
     if (selectedNode) {
       const updatedNodes = data.nodes.map((node) =>
         node.id === updatedNode.id ? updatedNode : node
       );
       setSelectedNode(updatedNode);
-      // You might want to trigger a full graph refresh here or update the graph data
       if (onNodeSelected) {
         onNodeSelected(updatedNode);
       }
+    }
+  };
+
+  const handleRelationshipUpdate = async (updatedRelationship: any) => {
+    setIsEditingRelationship(false);
+    
+    // Clear the selected relationship
+    setSelectedRelationship(null);
+
+    // If the relationship has a new ID (type was changed, which creates a new relationship in Neo4j)
+    if (updatedRelationship.oldId && updatedRelationship.id !== updatedRelationship.oldId) {
+      // First remove the old relationship visually
+      if (svgRef.current) {
+        const oldRelationshipId = updatedRelationship.oldId;
+        
+        // Remove the old relationship from the visualization
+        d3.select(svgRef.current)
+          .selectAll(".links line")
+          .filter((d: any) => d.id === parseInt(oldRelationshipId, 10))
+          .transition()
+          .duration(300)
+          .style("opacity", 0)
+          .remove();
+        
+        d3.select(svgRef.current)
+          .selectAll(".links text")
+          .filter((d: any) => d.id === parseInt(oldRelationshipId, 10))
+          .transition()
+          .duration(300)
+          .style("opacity", 0)
+          .remove();
+      }
+      
+      // Inform the parent component to refresh the graph data
+      if (onRelationshipSelected) {
+        onRelationshipSelected(null);
+      }
+    } else {
+      // Just a property update, update the selected relationship to reflect the changes
+      if (selectedRelationship) {
+        setSelectedRelationship(updatedRelationship);
+        
+        // Update relationship type label in the visualization
+        if (svgRef.current && selectedRelationship.id) {
+          d3.select(svgRef.current)
+            .selectAll(".links text")
+            .filter((d: any) => d.id === selectedRelationship.id)
+            .text(updatedRelationship.type);
+        }
+        
+        if (onRelationshipSelected) {
+          onRelationshipSelected(updatedRelationship);
+        }
+      }
+    }
+  };
+
+  const handleRelationshipDelete = async (deletedRelationship: any) => {
+    // Close the edit form
+    setIsEditingRelationship(false);
+    // Clear the selected relationship
+    setSelectedRelationship(null);
+    
+    // Optionally, update the graph to remove the relationship visually
+    // This could involve removing the relationship line from the D3 visualization
+    if (svgRef.current) {
+      const relationshipId = deletedRelationship.id;
+      d3.select(svgRef.current)
+        .selectAll(".links line")
+        .filter((d: any) => d.id === relationshipId)
+        .transition()
+        .duration (300)
+        .style("opacity", 0)
+        .remove();
+      
+      d3.select(svgRef.current)
+        .selectAll(".links text")
+        .filter((d: any) => d.id === relationshipId)
+        .transition()
+        .duration(300)
+        .style("opacity", 0)
+        .remove();
     }
   };
 
@@ -863,15 +1118,20 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
           left: 0,
           width: "100%",
           height: "100%",
-          overflow: "hidden", // Keep overflow hidden on SVG itself
+          overflow: "hidden",
           cursor: "grab",
         }}
         preserveAspectRatio="xMidYMid meet"
       />
 
-      {/* Selected Node Details Panel */}
       {selectedNode && (
-        <div className="absolute bottom-5 right-5 p-4 bg-card text-card-foreground shadow-xl rounded-lg max-w-md w-full sm:w-auto z-20 border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInUp">
+        <div 
+          className="absolute bottom-5 right-5 p-4 bg-card text-card-foreground shadow-xl rounded-lg max-w-md w-full sm:w-auto border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInUp"
+          style={{ 
+            zIndex: selectedRelationship ? 20 : 30, 
+            display: selectedRelationship ? 'none' : 'block'
+          }}
+        >
           {!isEditing ? (
             <>
               <div className="flex items-center justify-between mb-3">
@@ -906,7 +1166,7 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
               <div className="max-h-48 overflow-y-auto space-y-1.5 text-sm mb-3 pr-1 scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
                 {selectedNode.properties &&
                   Object.entries(selectedNode.properties)
-                    .filter(([key]) => key !== "name") // Already shown in title
+                    .filter(([key]) => key !== "name")
                     .map(([key, value]) => (
                       <div key={key} className="flex ">
                         <span className="font-medium mr-2 text-muted-foreground capitalize whitespace-nowrap">
@@ -974,7 +1234,117 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
         </div>
       )}
 
-      {/* Categorized/Connected Nodes Panel */}
+      {selectedRelationship && (
+        <div
+          className={`absolute bottom-0 right-0 mb-8 mr-8 w-80 p-4 bg-card border rounded-lg shadow-lg transition-all duration-300 ${
+            isSidebarOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+          style={{ 
+            zIndex: selectedNode ? 20 : 30,
+            display: selectedNode ? 'none' : 'block'
+          }}
+        >
+          {isEditingRelationship ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold">Editar Relacionamento</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (formChanged) {
+                        setShowExitConfirmation(true);
+                      } else {
+                        setIsEditingRelationship(false);
+                      }
+                    }}
+                    className="p-1 hover:bg-muted rounded-md transition-colors"
+                    title="Fechar"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <RelationshipEditForm
+                relationship={selectedRelationship}
+                onSave={handleRelationshipUpdate}
+                onCancel={() => setIsEditingRelationship(false)}
+                onFormChanged={setFormChanged}
+                onDelete={handleRelationshipDelete}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold">Relacionamento</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsEditingRelationship(true)}
+                    className="p-1 hover:bg-muted rounded-md transition-colors"
+                    title="Editar Relacionamento"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => setSelectedRelationship(null)}
+                    className="p-1 hover:bg-muted rounded-md transition-colors"
+                    title="Fechar"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="mb-4 p-3 bg-muted rounded-md">
+                <div className="text-xs uppercase text-muted-foreground mb-1">Tipo</div>
+                <div className="font-medium">{selectedRelationship.type}</div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="p-3 bg-muted rounded-md">
+                  <div className="text-xs uppercase text-muted-foreground mb-1">De</div>
+                  <div className="font-medium truncate">
+                    {typeof selectedRelationship.source === "object" 
+                      ? selectedRelationship.source.properties?.name || `Node ID: ${selectedRelationship.source.id}` 
+                      : `Node ID: ${selectedRelationship.source}`}
+                  </div>
+                </div>
+                <div className="p-3 bg-muted rounded-md">
+                  <div className="text-xs uppercase text-muted-foreground mb-1">Para</div>
+                  <div className="font-medium truncate">
+                    {typeof selectedRelationship.target === "object" 
+                      ? selectedRelationship.target.properties?.name || `Node ID: ${selectedRelationship.target.id}` 
+                      : `Node ID: ${selectedRelationship.target}`}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium">Propriedades</h4>
+                
+                {Object.keys(selectedRelationship.properties || {}).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(selectedRelationship.properties || {}).map(([key, value]) => (
+                      <div key={key} className="grid grid-cols-3 gap-2 text-sm">
+                        <div className="text-muted-foreground capitalize">
+                          {key.replace(/_/g, " ")}:
+                        </div>
+                        <div className="col-span-2 font-mono break-all">
+                          {formatValue(value)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground italic">
+                    Nenhuma propriedade
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {showCategorized && (
         <div className="absolute top-5 left-5 w-72 max-h-[calc(100vh-40px)] overflow-y-auto bg-card text-card-foreground shadow-xl rounded-lg p-4 z-20 border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInDown scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
           <h3 className="text-base font-semibold mb-3 text-center">
@@ -1028,7 +1398,6 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
                         }`}
                         title={node.properties.name}
                         onClick={(e) => {
-                          // Find the corresponding SVG element and dispatch a click
                           const nodeElement = d3
                             .select(svgRef.current)
                             .selectAll(".nodes g")
@@ -1039,9 +1408,9 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
                               new MouseEvent("click", { bubbles: true })
                             );
                           }
-                          e.stopPropagation(); // Prevent triggering SVG background click
+                          e.stopPropagation();
                         }}
-                        tabIndex={0} // Make it focusable
+                        tabIndex={0}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             const nodeElement = d3
@@ -1067,7 +1436,6 @@ export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
         </div>
       )}
 
-      {/* Exit Confirmation Dialog */}
       <Dialog
         open={showExitConfirmation}
         onOpenChange={setShowExitConfirmation}

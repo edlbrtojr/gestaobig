@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Waypoints, Home, BarChart3, FileText, Settings } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 import {
   Sidebar,
@@ -26,7 +27,6 @@ const navItems = [
     title: "Início",
     url: "/",
     icon: Home,
-    isActive: true,
   },
   {
     title: "O Tear",
@@ -52,35 +52,47 @@ const navItems = [
 
 export function NavItems() {
   const { state } = useSidebar();
+  const pathname = usePathname();
 
   return (
     <SidebarMenu>
-      {navItems.map((item) => (
-        <SidebarMenuItem key={item.title}>
-          <SidebarMenuButton
-            asChild
-            isActive={item.isActive}
-            tooltip={item.title}
-          >
-            <a
-              href={item.url}
-              className={cn(
-                "flex items-center min-w-0",
-                item.isActive
-                  ? "text-primary font-medium"
-                  : "text-muted-foreground"
-              )}
+      {navItems.map((item) => {
+        // Check for exact match (for home) or if the current path starts with the nav item URL (for nested routes)
+        const isActive = 
+          item.url === "/" 
+            ? pathname === "/" 
+            : pathname === item.url || pathname.startsWith(`${item.url}/`);
+            
+        return (
+          <SidebarMenuItem key={item.title}>
+            <SidebarMenuButton
+              asChild
+              isActive={isActive}
+              tooltip={item.title}
             >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex-shrink-0 w-5 h-5">
-                  <item.icon className="w-full h-full" />
+              <a
+                href={item.url}
+                className={cn(
+                  "flex items-center min-w-0",
+                  isActive
+                    ? "text-primary font-medium"
+                    : "text-muted-foreground"
+                )}
+              >
+                <div className="flex items-center gap-3 min-w-0 w-full">
+                  <div className={cn(
+                    "flex-shrink-0 w-5 h-5", 
+                    state === "collapsed" && "mx-auto"
+                  )}>
+                    <item.icon className="w-full h-full" />
+                  </div>
+                  <span className="truncate">{item.title}</span>
                 </div>
-                <span className="truncate">{item.title}</span>
-              </div>
-            </a>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ))}
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
+      })}
     </SidebarMenu>
   );
 }
@@ -89,7 +101,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar
       collapsible="icon"
-      className="border-r border-border/40"
+      className="border-r border-border/40 group-data-[state=collapsed]:w-16"
       {...props}
     >
       <SidebarHeader className="h-16 flex items-center px-4">

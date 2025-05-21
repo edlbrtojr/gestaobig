@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runQuery } from "@/lib/neo4j";
+import { executeWrite } from "@/lib/neo4j";
 import { relationsPartOne } from "./relations-part1";
 import { relationsPartTwo } from "./relations-part2";
 import { relationsPartThree } from "./relations-part3";
@@ -11,7 +11,7 @@ import { relationsPartThree } from "./relations-part3";
 export async function POST() {
   try {
     // Clear existing data
-    await runQuery(`MATCH (n) DETACH DELETE n`);
+    await executeWrite(`MATCH (n) DETACH DELETE n`);
 
     // Create nodes
     const createNodesQuery = `
@@ -181,17 +181,17 @@ export async function POST() {
     `;
 
     // Execute the queries in sequence
-    await runQuery(createNodesQuery);
+    await executeWrite(createNodesQuery);
 
     // Criar relações em lotes
     console.log("Criando relações parte 1...");
-    await relationsPartOne(runQuery);
+    await relationsPartOne(executeWrite);
 
     console.log("Criando relações parte 2...");
-    await relationsPartTwo(runQuery);
+    await relationsPartTwo(executeWrite);
 
     console.log("Criando relações parte 3...");
-    await relationsPartThree(runQuery);
+    await relationsPartThree(executeWrite);
 
     return NextResponse.json({ message: "Database seeded successfully" });
   } catch (error) {

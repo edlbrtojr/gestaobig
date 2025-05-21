@@ -350,6 +350,26 @@ export default function FilterControls({
 
       {/* Divider */}
       <div className="border-t border-gray-200 dark:border-gray-800"></div>
+      
+      {/* Company Filter Dropdown */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-foreground">Empresas</h3>
+        </div>
+        <select
+          className="w-full rounded-md border bg-background border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          value={filters.company}
+          onChange={handleCompanyChange}
+        >
+          {availableCompanies.map((company) => (
+            <option key={company} value={company}>
+              {company}
+            </option>
+          ))}
+        </select>
+      </div>
+
+
 
       {/* Node Types Filter */}
       <div className="space-y-2">
@@ -413,24 +433,6 @@ export default function FilterControls({
       {/* Divider */}
       <div className="border-t border-gray-200 dark:border-gray-800"></div>
 
-      {/* Company Filter Dropdown */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">Empresas</h3>
-        </div>
-        <select
-          className="w-full rounded-md border bg-background border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          value={filters.company}
-          onChange={handleCompanyChange}
-        >
-          {availableCompanies.map((company) => (
-            <option key={company} value={company}>
-              {company}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {/* Show Isolated Nodes Toggle */}
       <div className="flex items-center justify-between">
         <label
@@ -463,7 +465,7 @@ export default function FilterControls({
             }}
             className="sr-only peer"
           />
-          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/30 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/30 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 dark:peer-checked:bg-blue-500"></div>
         </label>
       </div>
 

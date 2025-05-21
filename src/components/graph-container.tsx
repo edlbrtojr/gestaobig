@@ -11,11 +11,16 @@ import Image from "next/image";
 interface GraphContainerProps {
   data: GraphData;
   onNodeSelected?: (node: any) => void;
+  onRelationshipSelected?: (relationship: any) => void;
 }
 
 // Using memo to prevent unnecessary re-renders when props haven't changed
 const GraphContainer = memo(
-  function GraphContainerInner({ data, onNodeSelected }: GraphContainerProps) {
+  function GraphContainerInner({ 
+    data, 
+    onNodeSelected,
+    onRelationshipSelected 
+  }: GraphContainerProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -350,23 +355,18 @@ const GraphContainer = memo(
     return (
       <div
         ref={containerRef}
-        className={
-          isFullscreen
-            ? "fixed inset-0 z-50 bg-background"
-            : "h-full w-full relative overflow-hidden rounded"
-        }
+        className={`relative flex w-full overflow-hidden ${
+          isFullscreen ? "fixed inset-0 z-50 bg-background" : "h-full"
+        }`}
       >
         {/* Dotted grid background with subtle wave effect */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 z-0"
+          className="absolute inset-0 pointer-events-none z-0 opacity-70 dark:opacity-50"
           style={{
-            opacity: 1,
-            pointerEvents: "none",
             width: "100%",
             height: "100%",
           }}
-          aria-hidden="true"
         />
 
         {/* FIEAC Logo */}
@@ -387,22 +387,43 @@ const GraphContainer = memo(
 
         {/* Fullscreen toggle button */}
         <Button
-          onClick={toggleFullscreen}
-          variant="secondary"
+          variant="ghost"
           size="icon"
           className="absolute top-2 right-2 z-10"
-          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-          title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
         >
           {isFullscreen ? (
-            <Shrink className="h-4 w-4" />
+            <Shrink className="w-5 h-5" />
           ) : (
-            <Expand className="h-4 w-4" />
+            <Expand className="w-5 h-5" />
           )}
         </Button>
 
-        <div className="h-full w-full relative z-1">
-          <GraphView data={data} onNodeSelected={onNodeSelected} />
+        <div className="relative w-full h-full overflow-hidden">
+          {data.nodes.length > 0 ? (
+            <GraphView 
+              data={data} 
+              onNodeSelected={onNodeSelected} 
+              onRelationshipSelected={onRelationshipSelected}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="text-center p-6 max-w-md">
+                <Image
+                  src="/empty-graph.png"
+                  width={150}
+                  height={150}
+                  alt="No data"
+                  className="mx-auto mb-4 opacity-40"
+                />
+                <h3 className="text-lg font-medium mb-2">Nenhum dado encontrado</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Não há nós ou conexões para exibir. Adicione elementos ao grafo ou ajuste os filtros.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -417,5 +438,8 @@ const GraphContainer = memo(
     );
   }
 );
+
+// Add display name for debugging
+GraphContainer.displayName = "GraphContainer";
 
 export default GraphContainer;
