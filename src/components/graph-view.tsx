@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import { D3Node, D3Link, GraphData } from "@/types/graph";
 import { useTheme } from "./theme-provider";
+import { Pencil, Save, X, GitBranch, Shield, Compass } from "lucide-react";
+import NodeEditForm from "@/components/node-edit-form";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface GraphViewProps {
   data: GraphData;
+  onNodeSelected?: (node: any) => void;
 }
 
 // Mapping node types to colors
@@ -29,6 +41,26 @@ const nodeColors: Record<string, string> = {
   Competidor: "#FF5722", // Deep Orange
 };
 
+// Define label colors based on the color contrast matrix
+const labelColors: Record<string, string> = {
+  Risco: "#FFFFFF", // White on Red
+  PlanoDeAcao: "#FFFFFF", // White on Green
+  Acao: "#FFFFFF", // White on Blue
+  Estrategia: "#000000", // Black on Amber/Yellow
+  Visao: "#FFFFFF", // White on Purple
+  Missao: "#FFFFFF", // White on Deep Purple
+  Oportunidade: "#000000", // Black on Orange
+  Departamento: "#FFFFFF", // White on Teal
+  Projeto: "#FFFFFF", // White on Indigo
+  Objetivo: "#FFFFFF", // White on Pink
+  KPI: "#FFFFFF", // White on Brown
+  Stakeholder: "#FFFFFF", // White on Gray
+  Tecnologia: "#000000", // Black on Cyan
+  Produto: "#FFFFFF", // White on Light Green
+  Mercado: "#000000", // Black on Yellow
+  Competidor: "#FFFFFF", // White on Deep Orange
+};
+
 // Default color for unknown node types
 const defaultColor = "#757575"; // Darker Gray for unknowns
 
@@ -37,7 +69,7 @@ interface CategorizedNodes {
   [category: string]: D3Node[];
 }
 
-export default function GraphView({ data }: GraphViewProps) {
+export default function GraphView({ data, onNodeSelected }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
@@ -46,7 +78,116 @@ export default function GraphView({ data }: GraphViewProps) {
     {}
   );
   const [showCategorized, setShowCategorized] = useState(false);
-  const { theme } = useTheme();
+  const { theme, resolvedTheme } = useTheme();
+  const [initialized, setInitialized] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [formChanged, setFormChanged] = useState(false);
+  const [showExitConfirmation, setShowExitConfirmation] = useState(false);
+  const dataRef = useRef(data); // Store previous data reference
+  const renderingRef = useRef(false); // Track if we're currently rendering
+
+  // Use memo for expensive graph data processing
+  const [processedData, nodeMap] = useMemo(() => {
+    if (!data.nodes.length) return [null, new Map()];
+
+    const map = new Map();
+    // Process nodes
+    const processedNodes = data.nodes.map((node) => {
+      const nodeId =
+        typeof node.id === "object" && node.id !== null
+          ? node.id.low
+          : Number(node.id);
+
+      const d3Node = {
+        ...node,
+        id: nodeId,
+      };
+      map.set(nodeId, d3Node);
+      return d3Node;
+    });
+
+    return [
+      {
+        nodes: processedNodes,
+        relationships: data.relationships,
+      },
+      map,
+    ];
+  }, [data]);
+
+  // Function to determine text and UI colors based on theme
+  const getThemeColors = () => {
+    const isDarkTheme =
+      resolvedTheme === "dark" ||
+      document.documentElement.classList.contains("dark") ||
+      document.documentElement.getAttribute("data-theme") === "dark";
+
+    return {
+      textColor: isDarkTheme ? "#FFFFFF" : "#0A0A0A", // White for dark, near-black for light
+      mutedForegroundColor: isDarkTheme ? "#A0A0A0" : "#707070", // Lighter gray for dark, darker gray for light
+      linkColor: isDarkTheme ? "#606060" : "#C0C0C0", // Visible gray for links in dark, lighter gray in light
+      nodeBorderColor: getComputedStyle(document.documentElement)
+        .getPropertyValue("--border")
+        .trim(),
+    };
+  };
+
+  // Force reinitialization when theme changes
+  useEffect(() => {
+    setInitialized((prev) => {
+      // Only set to false if we've already been initialized once
+      return prev ? false : prev;
+    });
+  }, [theme, resolvedTheme]);
+
+  // Only reinitialize when data actually changes
+  useEffect(() => {
+    // Skip if data is the same reference or has same nodes/relationships
+    if (
+      dataRef.current === data ||
+      (dataRef.current.nodes.length === data.nodes.length &&
+        dataRef.current.relationships.length === data.relationships.length)
+    ) {
+      return;
+    }
+
+    // Update the data reference
+    dataRef.current = data;
+
+    if (data.nodes.length > 0) {
+      // Use a smoother transition for data changes
+      const handleDataChange = () => {
+        setInitialized(false);
+
+        // Reset any selected state when data changes
+        setSelectedNode(null);
+        setConnectedNodes([]);
+        setShowCategorized(false);
+
+        // Clear any existing simulation with a smooth fade-out
+        if (simulationRef.current) {
+          simulationRef.current.stop();
+          simulationRef.current = null;
+        }
+
+        // Clear SVG contents with a transition
+        if (svgRef.current) {
+          d3.select(svgRef.current)
+            .selectAll("g.nodes, g.links")
+            .transition()
+            .duration(300)
+            .style("opacity", 0)
+            .on("end", () => {
+              // After fade-out completes, remove elements
+              d3.select(svgRef.current).selectAll("*").remove();
+            });
+        }
+      };
+
+      // Use requestAnimationFrame to ensure smoother handling of data changes
+      requestAnimationFrame(handleDataChange);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) {
@@ -83,43 +224,35 @@ export default function GraphView({ data }: GraphViewProps) {
         .getPropertyValue("--border")
         .trim();
 
+      // Get theme-aware colors
+      const { textColor, mutedForegroundColor, linkColor, nodeBorderColor } =
+        getThemeColors();
+
       // Define colors directly based on theme for critical D3 elements
-      // This bypasses potential issues with CSS var propagation into D3 if --foreground isn't updating as expected for D3
-      const d3TextColor = theme === "dark" ? "#FFFFFF" : "#0A0A0A"; // White for dark, near-black for light
-      const d3MutedForegroundColor = theme === "dark" ? "#A0A0A0" : "#707070"; // Lighter gray for dark, darker gray for light
-      const d3LinkColor = theme === "dark" ? "#606060" : "#C0C0C0"; // Visible gray for links in dark, lighter gray in light
-      const d3NodeBorderColor = `hsl(${rawBorderColor})`; // Keep using CSS var for less critical borders
+      const d3TextColor = textColor;
+      const d3MutedForegroundColor = mutedForegroundColor;
+      const d3LinkColor = linkColor;
+      const d3NodeBorderColor = `hsl(${nodeBorderColor})`;
 
       const containerWidth =
         svgRef.current!.parentElement?.clientWidth || window.innerWidth;
       const containerHeight =
         svgRef.current!.parentElement?.clientHeight || window.innerHeight;
 
-      const extractId = (id: any): number => {
+      const extractNodeId = (id: any): number => {
         if (id === null || id === undefined) return -1;
         if (typeof id === "object" && "low" in id) return id.low;
         return Number(id);
       };
 
-      const nodeMap = new Map();
-      const spiralPosition = (index: number, total: number) => {
-        const theta = index * 2.4;
-        const radiusScale = Math.min(containerWidth, containerHeight) * 0.2;
-        const radius = radiusScale * Math.sqrt(index / total);
-        return {
-          x: containerWidth / 2 + radius * Math.cos(theta),
-          y: containerHeight / 2 + radius * Math.sin(theta),
-        };
-      };
-
       const nodes: D3Node[] = data.nodes.map((node, i) => {
-        const nodeId = extractId(node.id);
-        const position = spiralPosition(i, data.nodes.length);
+        const nodeId = extractNodeId(node.id);
+        // All nodes start at the center with a tiny random offset
         const d3Node = {
           ...node,
           id: nodeId,
-          x: position.x,
-          y: position.y,
+          x: containerWidth / 2 + (Math.random() - 0.5) * 5, // tiny random offset to prevent perfect overlapping
+          y: containerHeight / 2 + (Math.random() - 0.5) * 5,
         };
         nodeMap.set(nodeId, d3Node);
         return d3Node;
@@ -127,9 +260,9 @@ export default function GraphView({ data }: GraphViewProps) {
 
       const links: D3Link[] = data.relationships.map((rel) => ({
         ...rel,
-        id: extractId(rel.id),
-        source: extractId(rel.source),
-        target: extractId(rel.target),
+        id: extractNodeId(rel.id),
+        source: extractNodeId(rel.source),
+        target: extractNodeId(rel.target),
       }));
 
       const validLinks: D3Link[] = links.filter((rel) => {
@@ -167,18 +300,19 @@ export default function GraphView({ data }: GraphViewProps) {
 
       const getNodeRadius = (nodeId: number): number => {
         const connectionCount = connectionCounts.get(nodeId) || 0;
-        const minRadius = 10;
-        const maxRadius = 25;
+        const minRadius = 15; // Increased from 10
+        const maxRadius = 45; // Increased from 25
         const minConnections = 0;
         const maxConnections = Math.max(
           ...Array.from(connectionCounts.values())
         );
         if (maxConnections === minConnections) return minRadius;
-        return (
-          minRadius +
-          ((connectionCount - minConnections) * (maxRadius - minRadius)) /
-            (maxConnections - minConnections)
-        );
+
+        // Apply non-linear scaling to emphasize differences in connection count
+        const connectionFactor =
+          Math.sqrt(connectionCount - minConnections) /
+          Math.sqrt(maxConnections - minConnections);
+        return minRadius + (maxRadius - minRadius) * connectionFactor;
       };
 
       const getConnectedNodeIds = (nodeId: number): number[] => {
@@ -214,23 +348,39 @@ export default function GraphView({ data }: GraphViewProps) {
       internalCategorizeNodes();
 
       const svg = d3
-        .select(svgRef.current!)
+        .select(svgRef.current)
         .attr("width", containerWidth)
         .attr("height", containerHeight);
-      const g = svg.append("g");
+
+      // Add a fade-in effect for all elements
+      const containerGroup = svg.append("g");
+      containerGroup
+        .style("opacity", 0)
+        .transition()
+        .duration(700) // Longer duration for smoother fade in
+        .style("opacity", 1);
+
+      const g = containerGroup.append("g");
 
       const zoom = d3
         .zoom()
-        .scaleExtent([0.05, 10])
+        .scaleExtent([0.1, 8])
         .on("zoom", (event) => {
           g.attr("transform", event.transform);
         });
-      svg.call(zoom as any);
-      const initialTransform = d3.zoomIdentity
-        .translate(containerWidth / 2, containerHeight / 2)
-        .scale(0.85);
-      svg.call(zoom.transform as any, initialTransform);
 
+      svg.call(zoom as any);
+
+      // Double-click to zoom reset
+      svg.on("dblclick.zoom", null);
+      svg.on("dblclick", () => {
+        svg
+          .transition()
+          .duration(750)
+          .call(zoom.transform as any, d3.zoomIdentity);
+      });
+
+      // Configure the simulation with gentler forces
       const simulation = d3
         .forceSimulation(nodes)
         .force(
@@ -238,20 +388,20 @@ export default function GraphView({ data }: GraphViewProps) {
           d3
             .forceLink(validLinks)
             .id((d: any) => d.id)
-            .distance(120)
-            .strength(0.5)
+            .distance(150)
+            .strength(0.2) // Reduced strength for gentler animation
         )
-        .force("charge", d3.forceManyBody().strength(-300))
+        .force("charge", d3.forceManyBody().strength(-500)) // Stronger repulsion for better spacing
         .force(
           "center",
-          d3.forceCenter(containerWidth / 2, containerHeight / 2).strength(0.05)
+          d3.forceCenter(containerWidth / 2, containerHeight / 2)
         )
         .force(
-          "collision",
-          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 25)
+          "collide",
+          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 10)
         )
-        .alpha(0.6)
-        .alphaDecay(0.015);
+        .alpha(0.3) // Lower alpha for calmer initial animation
+        .alphaDecay(0.015); // Slower decay for smoother movement
 
       simulation.on("tick", () => {
         g.selectAll(".links line")
@@ -315,10 +465,14 @@ export default function GraphView({ data }: GraphViewProps) {
       linkElements
         .append("line")
         .attr("stroke", d3LinkColor) // Use d3LinkColor for link lines
-        .attr("stroke-opacity", 0.5)
+        .attr("stroke-opacity", 0) // Start invisible
         .attr("stroke-width", 1.5)
         .attr("marker-end", "url(#arrow)")
-        .attr("data-id", (d: D3Link) => d.id);
+        .attr("data-id", (d: D3Link) => d.id)
+        .transition() // Add transition to fade lines in
+        .delay(800) // Delay after nodes appear
+        .duration(500)
+        .attr("stroke-opacity", 0.5); // Fade in to 50% opacity
 
       svg
         .append("defs")
@@ -340,8 +494,12 @@ export default function GraphView({ data }: GraphViewProps) {
         .attr("fill", d3TextColor) // Use d3TextColor for link labels
         .attr("text-anchor", "middle")
         .attr("dy", -4)
-        .attr("opacity", 0.7)
-        .text((d: D3Link) => d.type);
+        .attr("opacity", 0) // Start invisible
+        .text((d: D3Link) => d.type)
+        .transition() // Add transition to fade in link text
+        .delay(1000) // Delay after lines appear
+        .duration(500)
+        .attr("opacity", 0.7); // Fade to 70% opacity
 
       const drag = d3
         .drag<Element, D3Node>()
@@ -402,7 +560,7 @@ export default function GraphView({ data }: GraphViewProps) {
       nodeElements
         .append("circle")
         .attr("class", "node-circle")
-        .attr("r", (d: D3Node) => getNodeRadius(d.id))
+        .attr("r", 0) // Start with radius 0
         .attr("fill", (d: D3Node) => nodeColors[d.label] || defaultColor)
         .attr(
           "stroke",
@@ -413,49 +571,63 @@ export default function GraphView({ data }: GraphViewProps) {
               .toString() || d3NodeBorderColor
         )
         .attr("stroke-width", 1.5)
-        .style("filter", "url(#node-shadow)");
+        .style("filter", "url(#node-shadow)")
+        .transition() // Add transition for circle expansion
+        .duration(1000) // 1 second animation
+        .ease(d3.easeElasticOut.amplitude(0.5)) // Elastic animation that slows down
+        .attr("r", (d: D3Node) => getNodeRadius(d.id)); // Expand to final radius
 
+      // Add transition for labels to fade in after circles expand
       nodeElements
         .append("text")
         .attr("class", "node-name-text")
-        .attr("font-size", "10px")
-        .attr("font-weight", "500")
-        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 12)
+        .attr("font-size", "9px") // Slightly smaller to fit inside nodes
+        .attr("font-weight", "600") // Increased from 500 for better visibility inside nodes
+        .attr("dy", "0.3em") // Center vertically inside the node
         .attr("text-anchor", "middle")
-        .attr("fill", d3TextColor) // Node names use d3TextColor
+        .attr("fill", (d: D3Node) => {
+          // Determine text color based on background color brightness
+          const c = d3.hsl(nodeColors[d.label] || defaultColor);
+          return c && c.l > 0.55 ? "#000000" : "#FFFFFF";
+        })
         .style("pointer-events", "none")
-        .text((d: D3Node) =>
-          (d.properties?.name || `Node ${d.id}`).length > 15
-            ? (d.properties?.name || `Node ${d.id}`).substring(0, 13) + "..."
-            : d.properties?.name || `Node ${d.id}`
-        )
-        .append("title")
-        .text((d: D3Node) => d.properties?.name || `Node ${d.id}`);
+        .style("opacity", 0) // Start invisible
+        .text((d: D3Node) => {
+          const name = d.properties?.name || `Node ${d.id}`;
+          // Truncate text based on node size to fit inside
+          const radius = getNodeRadius(d.id);
+          const maxLength = Math.max(3, Math.floor(radius * 0.7)); // Dynamic length based on radius
+          return name.length > maxLength
+            ? name.substring(0, maxLength - 3) + "..."
+            : name;
+        })
+        .each(function (d: D3Node) {
+          // Append title before transition
+          d3.select(this)
+            .append("title")
+            .text(d.properties?.name || `Node ${d.id}`);
+        })
+        .transition() // Add transition for text fade-in
+        .delay(600) // Wait a bit before showing text
+        .duration(800)
+        .style("opacity", 1); // Fade in
 
+      // Node type text now positioned below the node instead of above
       nodeElements
         .append("text")
         .attr("class", "node-type-text")
         .attr("font-size", "8px")
         .attr("font-style", "italic")
-        .attr("dy", (d: D3Node) => -getNodeRadius(d.id) + 8)
+        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 14) // Moved below node
         .attr("text-anchor", "middle")
-        .attr("fill", d3MutedForegroundColor) // Node types use d3MutedForegroundColor
+        .attr("fill", d3MutedForegroundColor)
         .style("pointer-events", "none")
-        .text((d: D3Node) => d.label || "Unknown");
-
-      nodeElements
-        .append("text")
-        .attr("class", "node-connection-count")
-        .attr("font-size", "10px")
-        .attr("font-weight", "bold")
-        .attr("text-anchor", "middle")
-        .attr("dy", (d: D3Node) => (getNodeRadius(d.id) > 15 ? 4 : 3))
-        .attr("fill", (d: D3Node) => {
-          const c = d3.hsl(nodeColors[d.label] || defaultColor);
-          return c && c.l > 0.55 ? "#000000" : "#FFFFFF";
-        })
-        .style("pointer-events", "none")
-        .text((d: D3Node) => connectionCounts.get(d.id) || 0);
+        .style("opacity", 0) // Start invisible
+        .text((d: D3Node) => d.label || "Unknown")
+        .transition() // Add transition for text fade-in
+        .delay(700) // Wait a bit longer for type text
+        .duration(800)
+        .style("opacity", 1); // Fade in
 
       nodeElements.each(function (d: D3Node) {
         d3.select(this)
@@ -474,14 +646,24 @@ export default function GraphView({ data }: GraphViewProps) {
         setSelectedNode(d);
         setConnectedNodes(newlyConnected);
         setShowCategorized(true);
+
+        // Call the onNodeSelected callback if provided
+        if (onNodeSelected) {
+          onNodeSelected(d);
+        }
+
         const t = d3.transition().duration(300);
+
+        // Get current theme-appropriate colors
+        const { textColor } = getThemeColors();
+
         nodeElements
           .selectAll(".node-circle")
           .transition(t)
           .attr("opacity", 0.25)
           .attr("stroke-width", 1);
         nodeElements
-          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .selectAll(".node-name-text, .node-type-text")
           .transition(t)
           .attr("opacity", 0.3);
         linkElements
@@ -497,9 +679,9 @@ export default function GraphView({ data }: GraphViewProps) {
           .transition(t)
           .attr("opacity", 1)
           .attr("stroke-width", 2.5)
-          .attr("stroke", theme === "dark" ? "#FFFFFF" : "#000000");
+          .attr("stroke", textColor); // Use theme-appropriate color
         selectedSvgNode
-          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .selectAll(".node-name-text, .node-type-text")
           .transition(t)
           .attr("opacity", 1);
 
@@ -511,7 +693,7 @@ export default function GraphView({ data }: GraphViewProps) {
           .attr("stroke-width", 2);
         nodeElements
           .filter((n: D3Node) => newlyConnected.includes(n.id))
-          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .selectAll(".node-name-text, .node-type-text")
           .transition(t)
           .attr("opacity", 0.9);
 
@@ -526,7 +708,7 @@ export default function GraphView({ data }: GraphViewProps) {
           .transition(t)
           .attr("stroke-opacity", 0.8)
           .attr("stroke-width", 2)
-          .attr("stroke", d3TextColor);
+          .attr("stroke", textColor); // Use theme-appropriate color
         linkElements
           .filter(
             (l: D3Link) =>
@@ -537,14 +719,26 @@ export default function GraphView({ data }: GraphViewProps) {
           .selectAll("text")
           .transition(t)
           .attr("opacity", 1)
-          .attr("font-weight", "bold");
+          .attr("font-weight", "bold")
+          .attr("fill", textColor); // Use theme-appropriate color
       });
 
       svg.on("click", () => {
         setSelectedNode(null);
         setConnectedNodes([]);
         setShowCategorized(false);
+
+        // Call the onNodeSelected callback with null when no node is selected
+        if (onNodeSelected) {
+          onNodeSelected(null);
+        }
+
         const t = d3.transition().duration(300);
+
+        // Get current theme-appropriate colors
+        const { textColor, linkColor } = getThemeColors();
+
+        const nodeElements = d3.select(svgRef.current).selectAll(".nodes g");
         nodeElements
           .selectAll(".node-circle")
           .transition(t)
@@ -559,24 +753,27 @@ export default function GraphView({ data }: GraphViewProps) {
           )
           .attr("stroke-width", 1.5);
         nodeElements
-          .selectAll(".node-name-text, .node-type-text, .node-connection-count")
+          .selectAll(".node-name-text, .node-type-text")
           .transition(t)
           .attr("opacity", 1);
-        linkElements
-          .selectAll("line")
+        d3.select(svgRef.current)
+          .selectAll(".links line")
           .transition(t)
-          .attr("stroke", d3LinkColor)
+          .attr("stroke", linkColor)
           .attr("stroke-opacity", 0.5)
           .attr("stroke-width", 1.5);
-        linkElements
-          .selectAll("text")
+        d3.select(svgRef.current)
+          .selectAll(".links text")
           .transition(t)
-          .attr("fill", d3TextColor)
+          .attr("fill", textColor)
           .attr("opacity", 0.7)
           .attr("font-weight", "normal");
       });
 
       simulationRef.current = simulation;
+
+      // Mark as initialized after the graph has been rendered
+      setInitialized(true);
     }); // End of requestAnimationFrame
 
     return () => {
@@ -585,13 +782,81 @@ export default function GraphView({ data }: GraphViewProps) {
         simulationRef.current.stop();
       }
     };
-  }, [data, theme]); // Keep theme to re-render on theme change
+  }, [data, theme, resolvedTheme, initialized]);
+
+  // Effect to update text colors when theme changes but graph is already rendered
+  useEffect(() => {
+    if (!initialized || !svgRef.current) return;
+
+    // Update colors for existing elements without rebuilding the entire graph
+    const updateThemeColors = () => {
+      const { textColor, mutedForegroundColor, linkColor } = getThemeColors();
+
+      const svg = d3.select(svgRef.current!);
+
+      // Update link text colors
+      svg.selectAll(".links text").attr("fill", textColor);
+
+      // Update node text colors
+      svg.selectAll(".node-name-text").attr("fill", textColor);
+
+      // Update node type text colors
+      svg.selectAll(".node-type-text").attr("fill", mutedForegroundColor);
+
+      // Update arrow marker colors
+      svg.select("#arrow path").attr("fill", textColor);
+
+      // Update link line colors
+      svg.selectAll(".links line").attr("stroke", linkColor);
+    };
+
+    // Use requestAnimationFrame to ensure the DOM is ready
+    requestAnimationFrame(updateThemeColors);
+
+    // Set up mutation observer to detect theme class changes on document element
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (
+          mutation.type === "attributes" &&
+          (mutation.attributeName === "class" ||
+            mutation.attributeName === "data-theme")
+        ) {
+          requestAnimationFrame(updateThemeColors);
+        }
+      });
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [theme, resolvedTheme, initialized]);
+
+  // Add this function to handle node updates
+  const handleNodeUpdate = async (updatedNode: any) => {
+    setIsEditing(false);
+    // Update the local state and trigger a re-render
+    if (selectedNode) {
+      const updatedNodes = data.nodes.map((node) =>
+        node.id === updatedNode.id ? updatedNode : node
+      );
+      setSelectedNode(updatedNode);
+      // You might want to trigger a full graph refresh here or update the graph data
+      if (onNodeSelected) {
+        onNodeSelected(updatedNode);
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col h-full w-full relative isolate">
       <svg
         ref={svgRef}
-        className="w-full h-full bg-background text-foreground"
+        className="w-full h-full bg-transparent text-foreground"
         style={{
           position: "absolute",
           top: 0,
@@ -607,56 +872,105 @@ export default function GraphView({ data }: GraphViewProps) {
       {/* Selected Node Details Panel */}
       {selectedNode && (
         <div className="absolute bottom-5 right-5 p-4 bg-card text-card-foreground shadow-xl rounded-lg max-w-md w-full sm:w-auto z-20 border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInUp">
-          <div className="flex items-center justify-between mb-3">
-            <h3
-              className="text-lg font-semibold truncate pr-2"
-              title={selectedNode.properties?.name || `Node ${selectedNode.id}`}
-            >
-              {selectedNode.properties?.name || `Node ${selectedNode.id}`}
-            </h3>
-            <span
-              className="inline-block w-4 h-4 rounded-full flex-shrink-0"
-              style={{
-                backgroundColor: nodeColors[selectedNode.label] || defaultColor,
-              }}
-            ></span>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">
-            Tipo: {selectedNode.label || "Unknown"}
-          </p>
-          <div className="max-h-48 overflow-y-auto space-y-1.5 text-sm mb-3 pr-1 scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
-            {selectedNode.properties &&
-              Object.entries(selectedNode.properties)
-                .filter(([key]) => key !== "name") // Already shown in title
-                .map(([key, value]) => (
-                  <div key={key} className="flex ">
-                    <span className="font-medium mr-2 text-muted-foreground capitalize whitespace-nowrap">
-                      {key.replace(/_/g, " ")}:
-                    </span>
-                    <span className="truncate" title={String(value)}>
-                      {typeof value === "object" && value !== null
-                        ? JSON.stringify(value)
-                        : String(value)}
-                    </span>
-                  </div>
-                ))}
-          </div>
-          <div className="mt-2 pt-2 border-t border-border">
-            <span className="text-sm font-medium text-muted-foreground">
-              Conexões: {connectedNodes.length}
-            </span>
-          </div>
-          <button
-            className="mt-4 w-full px-4 py-2 text-sm bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-card"
-            onClick={() => {
-              // Simulate background click to reset everything
-              svgRef.current?.dispatchEvent(
-                new MouseEvent("click", { bubbles: true })
-              );
-            }}
-          >
-            Fechar
-          </button>
+          {!isEditing ? (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h3
+                  className="text-lg font-semibold truncate pr-2"
+                  title={
+                    selectedNode.properties?.name || `Node ${selectedNode.id}`
+                  }
+                >
+                  {selectedNode.properties?.name || `Node ${selectedNode.id}`}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1 hover:bg-muted rounded-md transition-colors"
+                    title="Editar Nó"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <span
+                    className="inline-block w-4 h-4 rounded-full flex-shrink-0"
+                    style={{
+                      backgroundColor:
+                        nodeColors[selectedNode.label] || defaultColor,
+                    }}
+                  ></span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Tipo: {selectedNode.label || "Unknown"}
+              </p>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 text-sm mb-3 pr-1 scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-card-background">
+                {selectedNode.properties &&
+                  Object.entries(selectedNode.properties)
+                    .filter(([key]) => key !== "name") // Already shown in title
+                    .map(([key, value]) => (
+                      <div key={key} className="flex ">
+                        <span className="font-medium mr-2 text-muted-foreground capitalize whitespace-nowrap">
+                          {key.replace(/_/g, " ")}:
+                        </span>
+                        <span className="truncate" title={String(value)}>
+                          {typeof value === "object" && value !== null
+                            ? JSON.stringify(value)
+                            : String(value)}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+              <div className="mt-2 pt-2 border-t border-border">
+                <span className="text-sm font-medium text-muted-foreground">
+                  Conexões: {connectedNodes.length}
+                </span>
+              </div>
+              <button
+                className="mt-4 w-full px-4 py-2 text-sm bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-card"
+                onClick={() => {
+                  svgRef.current?.dispatchEvent(
+                    new MouseEvent("click", { bubbles: true })
+                  );
+                }}
+              >
+                Fechar
+              </button>
+            </>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold">Editar Nó</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (formChanged) {
+                        setShowExitConfirmation(true);
+                      } else {
+                        setIsEditing(false);
+                      }
+                    }}
+                    className="p-1 hover:bg-muted rounded-md transition-colors"
+                    title="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                  <span
+                    className="inline-block w-4 h-4 rounded-full flex-shrink-0"
+                    style={{
+                      backgroundColor:
+                        nodeColors[selectedNode.label] || defaultColor,
+                    }}
+                  ></span>
+                </div>
+              </div>
+              <NodeEditForm
+                node={selectedNode}
+                onSave={handleNodeUpdate}
+                onCancel={() => setIsEditing(false)}
+                onFormChanged={setFormChanged}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -752,6 +1066,40 @@ export default function GraphView({ data }: GraphViewProps) {
             })}
         </div>
       )}
+
+      {/* Exit Confirmation Dialog */}
+      <Dialog
+        open={showExitConfirmation}
+        onOpenChange={setShowExitConfirmation}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogDescription>
+              You have unsaved changes. Are you sure you want to exit the
+              editor?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowExitConfirmation(false)}
+            >
+              Continue Editing
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setShowExitConfirmation(false);
+                setFormChanged(false);
+                setIsEditing(false);
+              }}
+            >
+              Discard Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

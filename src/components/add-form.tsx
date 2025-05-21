@@ -2,6 +2,24 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Check, ChevronsUpDown, Search, X } from "lucide-react";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Combobox, ComboboxOption } from "@/components/ui/combobox";
 
 // Define types for node configurations
 interface NodeProperties {
@@ -277,25 +295,50 @@ interface AddFormProps {
   onAdd?: () => void;
 }
 
+// Get valid relationship types between source and target node types
+const getValidRelationshipTypes = (
+  sourceType: string,
+  targetType: string
+): string[] => {
+  if (!sourceType || !targetType) return [];
+
+  // Get allowed relationships from source node type
+  const allowedRelationships =
+    NODE_TYPES_CONFIG[sourceType]?.allowedRelationships || [];
+
+  // Return all allowed relationships for simplicity
+  // In a more sophisticated system, this would filter by which relationships
+  // can connect specific target node types
+  return allowedRelationships;
+};
+
+// Helper function to safely extract a string ID from a Neo4j node ID
+const getUniqueNodeId = (nodeId: any): string => {
+  if (nodeId === null || nodeId === undefined) return "unknown";
+  if (typeof nodeId === "string") return nodeId;
+  if (typeof nodeId === "number") return String(nodeId);
+  // Handle Neo4j integer objects which have a 'low' property
+  if (typeof nodeId === "object" && nodeId !== null && "low" in nodeId) {
+    return String(nodeId.low);
+  }
+  // Last resort for any other object
+  return JSON.stringify(nodeId);
+};
+
 export default function AddForm({ onAdd }: AddFormProps) {
   const router = useRouter();
-  const [isAddingNode, setIsAddingNode] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{
-    text: string;
-    type: "success" | "error";
-  } | null>(null);
-  const [existingNodes, setExistingNodes] = useState<any[]>([]);
-  const [customPropertyMode, setCustomPropertyMode] = useState(false);
-
-  // Node form state
+  const [formType, setFormType] = useState<"node" | "relationship">("node");
+  const [selectedNodeType, setSelectedNodeType] = useState<string>("Risco");
   const [nodeFormData, setNodeFormData] = useState<NodeFormData>({
     name: "",
-    label: NODE_TYPES[0],
-    properties: { ...NODE_TYPES_CONFIG[NODE_TYPES[0]].properties },
+    label: "Risco",
+    properties: { ...NODE_TYPES_CONFIG["Risco"].properties },
   });
-
-  // Relationship form state
+  const [customProperties, setCustomProperties] = useState<{
+    [key: string]: string;
+  }>({});
+  const [customPropertyKey, setCustomPropertyKey] = useState<string>("");
+  const [customPropertyValue, setCustomPropertyValue] = useState<string>("");
   const [relationshipFormData, setRelationshipFormData] =
     useState<RelationshipFormData>({
       source: "",
@@ -305,10 +348,15 @@ export default function AddForm({ onAdd }: AddFormProps) {
       type: "",
       properties: {},
     });
-
-  // Custom property form state
-  const [newPropertyKey, setNewPropertyKey] = useState("");
-  const [newPropertyValue, setNewPropertyValue] = useState("");
+  const [existingNodes, setExistingNodes] = useState<
+    { id: string; name: string; label: string; properties: any }[]
+  >([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [showCustomPropertiesForm, setShowCustomPropertiesForm] =
+    useState<boolean>(false);
 
   // Fetch existing nodes on component mount
   useEffect(() => {
@@ -346,13 +394,18 @@ export default function AddForm({ onAdd }: AddFormProps) {
       const response = await fetch(`/api/graph?t=${Date.now()}`);
       if (!response.ok) throw new Error("Falha ao buscar nós existentes");
       const data = await response.json();
-      setExistingNodes(data.nodes);
+
+      // Normalize node IDs to ensure consistent object shape
+      const normalizedNodes = data.nodes.map((node: any) => ({
+        ...node,
+        id: getUniqueNodeId(node.id), // Convert Neo4j ID to string for consistent comparison
+        name: node.properties?.name || `Node ${getUniqueNodeId(node.id)}`, // Ensure name is extracted from properties
+      }));
+
+      setExistingNodes(normalizedNodes);
     } catch (error) {
       console.error("Error fetching nodes:", error);
-      setMessage({
-        text: "Falha ao carregar nós existentes",
-        type: "error",
-      });
+      setError("Falha ao carregar nós existentes");
     }
   };
 
@@ -367,43 +420,35 @@ export default function AddForm({ onAdd }: AddFormProps) {
   };
 
   const handleAddCustomProperty = () => {
-    if (!newPropertyKey.trim()) return;
+    if (!customPropertyKey.trim()) return;
 
-    setNodeFormData({
-      ...nodeFormData,
-      properties: {
-        ...nodeFormData.properties,
-        [newPropertyKey]: newPropertyValue,
-      },
+    setCustomProperties({
+      ...customProperties,
+      [customPropertyKey]: customPropertyValue,
     });
 
     // Clear inputs
-    setNewPropertyKey("");
-    setNewPropertyValue("");
+    setCustomPropertyKey("");
+    setCustomPropertyValue("");
   };
 
   const handleRemoveCustomProperty = (key: string) => {
-    const newProperties = { ...nodeFormData.properties };
+    const newProperties = { ...customProperties };
     delete newProperties[key];
-    setNodeFormData({
-      ...nodeFormData,
-      properties: newProperties,
-    });
+    setCustomProperties(newProperties);
   };
 
   const handleSubmitNode = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setMessage(null);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
 
     try {
       // Validate inputs
       if (!nodeFormData.name.trim()) {
-        setMessage({
-          text: "Nome do nó é obrigatório",
-          type: "error",
-        });
-        setIsLoading(false);
+        setError("Nome do nó é obrigatório");
+        setLoading(false);
         return;
       }
 
@@ -442,10 +487,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
       // Refresh list of nodes first to ensure the new node is available
       await fetchExistingNodes();
 
-      setMessage({
-        text: "Nó adicionado com sucesso! Adicione um relacionamento.",
-        type: "success",
-      });
+      setSuccess("Nó adicionado com sucesso! Adicione um relacionamento.");
 
       // Call onAdd callback if provided
       if (onAdd) onAdd();
@@ -467,7 +509,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
           type: "", // This will be repopulated by the useEffect based on sourceType
           properties: {},
         });
-        setIsAddingNode(false); // Switch to relationship form
+        setFormType("relationship"); // Switch to relationship form
       }
 
       // Reset node form (even though we are switching, it's good practice)
@@ -478,22 +520,21 @@ export default function AddForm({ onAdd }: AddFormProps) {
       });
     } catch (error) {
       console.error("Error adding node:", error);
-      setMessage({
-        text:
-          error instanceof Error
-            ? error.message
-            : "Falha ao adicionar nó. Tente novamente.",
-        type: "error",
-      });
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Falha ao adicionar nó. Tente novamente."
+      );
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   const handleSubmitRelationship = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setMessage(null);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
 
     try {
       // Validate inputs
@@ -502,11 +543,8 @@ export default function AddForm({ onAdd }: AddFormProps) {
         !relationshipFormData.target ||
         !relationshipFormData.type
       ) {
-        setMessage({
-          text: "Origem, destino e tipo de relacionamento são obrigatórios",
-          type: "error",
-        });
-        setIsLoading(false);
+        setError("Origem, destino e tipo de relacionamento são obrigatórios");
+        setLoading(false);
         return;
       }
 
@@ -542,10 +580,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
         properties: {},
       });
 
-      setMessage({
-        text: "Relacionamento adicionado com sucesso!",
-        type: "success",
-      });
+      setSuccess("Relacionamento adicionado com sucesso!");
 
       // Call onAdd callback if provided
       if (onAdd) onAdd();
@@ -554,15 +589,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
       router.refresh();
     } catch (error) {
       console.error("Error adding relationship:", error);
-      setMessage({
-        text:
-          error instanceof Error
-            ? error.message
-            : "Falha ao adicionar relacionamento. Tente novamente.",
-        type: "error",
-      });
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Falha ao adicionar relacionamento. Tente novamente."
+      );
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
@@ -618,351 +651,466 @@ export default function AddForm({ onAdd }: AddFormProps) {
     return [];
   };
 
+  // Convert existingNodes to ComboboxOption format
+  const nodeOptions: ComboboxOption[] = existingNodes.map((node) => ({
+    value: node.id,
+    label: node.name,
+    description: node.label,
+  }));
+
+  // Filter target nodes to exclude the selected source node
+  const targetNodeOptions = nodeOptions.filter(
+    (option) => option.value !== relationshipFormData.source
+  );
+
+  // Convert relationship types to ComboboxOption format
+  const relationshipTypeOptions: ComboboxOption[] = relationshipTypes.map(
+    (type) => ({
+      value: type,
+      label: type,
+    })
+  );
+
   return (
-    <div className="border border-[var(--card-border)] rounded-lg p-6 bg-[var(--card-background)] shadow-sm">
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-4">Adicionar ao Grafo</h2>
-        <div className="flex space-x-4">
-          <button
-            className={`px-4 py-2 rounded-md transition-colors ${
-              isAddingNode
-                ? "bg-[var(--primary)] text-white"
-                : "bg-[var(--muted-background)] text-[var(--foreground)]"
-            }`}
-            onClick={() => setIsAddingNode(true)}
-          >
-            Adicionar Nó
-          </button>
-          <button
-            className={`px-4 py-2 rounded-md transition-colors ${
-              !isAddingNode
-                ? "bg-[var(--primary)] text-white"
-                : "bg-[var(--muted-background)] text-[var(--foreground)]"
-            }`}
-            onClick={() => setIsAddingNode(false)}
-          >
-            Adicionar Relacionamento
-          </button>
-        </div>
-      </div>
+    <div className="w-full p-6">
+      {/* Tabs for Form Type Selection */}
+      <Tabs
+        defaultValue="node"
+        value={formType}
+        onValueChange={(value) => setFormType(value as "node" | "relationship")}
+        className="w-full mb-6"
+      >
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="node">Adicionar Nó</TabsTrigger>
+          <TabsTrigger value="relationship">Adicionar Relação</TabsTrigger>
+        </TabsList>
 
-      {/* Message display */}
-      {message && (
-        <div
-          className={`p-4 mb-4 rounded-md ${
-            message.type === "success"
-              ? "bg-[var(--success)] bg-opacity-10 text-[var(--success)]"
-              : "bg-[var(--danger)] bg-opacity-10 text-[var(--danger)]"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      {isAddingNode ? (
-        // Node Form
-        <form onSubmit={handleSubmitNode}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Tipo de Nó
-              </label>
-              <select
-                className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                value={nodeFormData.label}
-                onChange={(e) =>
-                  setNodeFormData({
-                    ...nodeFormData,
-                    label: e.target.value,
-                  })
-                }
-                required
+        {/* Status Messages */}
+        {error && (
+          <div className="mt-4 mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-800 text-sm dark:bg-red-900/20 dark:border-red-800/30 dark:text-red-300">
+            <p className="flex items-center gap-1.5">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4"
+                viewBox="0 0 20 20"
+                fill="currentColor"
               >
-                {NODE_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Nome</label>
-              <input
-                type="text"
-                className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                value={nodeFormData.name}
-                onChange={(e) =>
-                  setNodeFormData({
-                    ...nodeFormData,
-                    name: e.target.value,
-                  })
-                }
-                required
-              />
-            </div>
-
-            <div className="space-y-3">
-              <label className="block text-sm font-medium mb-1">
-                Propriedades Padrão
-              </label>
-              <div className="space-y-3">
-                {Object.entries(
-                  NODE_TYPES_CONFIG[nodeFormData.label]?.properties || {}
-                ).map(([key, defaultValue]) => {
-                  const inputType = getInputType(key, nodeFormData.label);
-                  const options = getOptions(key, nodeFormData.label);
-                  const currentValue =
-                    nodeFormData.properties[key] ?? defaultValue ?? "";
-
-                  return (
-                    <div key={key} className="space-y-1">
-                      <label
-                        htmlFor={`prop-${key}`}
-                        className="block text-xs font-medium text-[var(--muted-foreground)] capitalize"
-                      >
-                        {key.replace(/_/g, " ")}
-                      </label>
-                      {inputType === "select" ? (
-                        <select
-                          id={`prop-${key}`}
-                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                          value={currentValue}
-                          onChange={(e) =>
-                            handlePropertyChange(key, e.target.value)
-                          }
-                        >
-                          {options.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      ) : inputType === "textarea" ? (
-                        <textarea
-                          id={`prop-${key}`}
-                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)] min-h-[60px]"
-                          value={currentValue}
-                          onChange={(e) =>
-                            handlePropertyChange(key, e.target.value)
-                          }
-                        />
-                      ) : (
-                        <input
-                          id={`prop-${key}`}
-                          type={inputType}
-                          className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                          value={currentValue}
-                          onChange={(e) =>
-                            handlePropertyChange(key, e.target.value)
-                          }
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <div className="flex justify-between items-center mb-2">
-                <label className="block text-sm font-medium">
-                  Propriedades Personalizadas
-                </label>
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded-md bg-[var(--muted-background)]"
-                  onClick={() => setCustomPropertyMode(!customPropertyMode)}
-                >
-                  {customPropertyMode ? "Esconder" : "Mostrar"}
-                </button>
-              </div>
-
-              {customPropertyMode && (
-                <div className="space-y-3 pt-2">
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      placeholder="Chave"
-                      className="flex-1 p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                      value={newPropertyKey}
-                      onChange={(e) => setNewPropertyKey(e.target.value)}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Valor"
-                      className="flex-1 p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                      value={newPropertyValue}
-                      onChange={(e) => setNewPropertyValue(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="px-3 py-2 bg-[var(--muted-background)] rounded-md"
-                      onClick={handleAddCustomProperty}
-                    >
-                      +
-                    </button>
-                  </div>
-                  {/* Display custom properties for editing/removal */}
-                  {Object.entries(nodeFormData.properties)
-                    .filter(
-                      ([key]) =>
-                        !(
-                          key in
-                          (NODE_TYPES_CONFIG[nodeFormData.label]?.properties ||
-                            {})
-                        )
-                    )
-                    .map(([key, value]) => (
-                      <div
-                        key={`custom-${key}`}
-                        className="flex items-center space-x-2 p-2 border border-dashed border-[var(--card-border)] rounded-md bg-[var(--muted-background)]/50"
-                      >
-                        <span className="font-medium text-sm capitalize flex-1">
-                          {key.replace(/_/g, " ")}:
-                        </span>
-                        <input
-                          type="text"
-                          className="flex-1 p-1.5 border border-[var(--card-border)] rounded-md bg-[var(--background)] text-sm"
-                          value={String(value)}
-                          onChange={(e) =>
-                            handlePropertyChange(key, e.target.value)
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="p-1 text-[var(--danger)] hover:text-[var(--danger-hover)]"
-                          onClick={() => handleRemoveCustomProperty(key)}
-                          title={`Remover ${key}`}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              className="w-full px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors"
-              disabled={isLoading}
-            >
-              {isLoading ? "Adicionando..." : "Adicionar Nó"}
-            </button>
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {error}
+            </p>
           </div>
-        </form>
-      ) : (
-        // Relationship Form
-        <form onSubmit={handleSubmitRelationship}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Nó de Origem
-              </label>
-              <select
-                className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                value={relationshipFormData.source}
-                onChange={(e) => {
-                  const selectedNode = existingNodes.find(
-                    (node) => (node.id.low || node.id) == e.target.value
-                  );
+        )}
 
-                  setRelationshipFormData({
-                    ...relationshipFormData,
-                    source: e.target.value,
-                    sourceType: selectedNode?.label || "",
-                  });
-                }}
-                required
+        {success && (
+          <div className="mt-4 mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-green-800 text-sm dark:bg-green-900/20 dark:border-green-800/30 dark:text-green-300">
+            <p className="flex items-center gap-1.5">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4"
+                viewBox="0 0 20 20"
+                fill="currentColor"
               >
-                <option value="">Selecione um nó</option>
-                {existingNodes.map((node) => (
-                  <option
-                    key={`source-${node.id.low || node.id}`}
-                    value={node.id.low || node.id}
-                  >
-                    {node.properties.name} ({node.label})
-                  </option>
-                ))}
-              </select>
-            </div>
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {success}
+            </p>
+          </div>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Tipo de Relacionamento
-              </label>
-              <select
-                className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                value={relationshipFormData.type}
-                onChange={(e) =>
-                  setRelationshipFormData({
-                    ...relationshipFormData,
-                    type: e.target.value,
-                  })
-                }
-                disabled={!relationshipFormData.sourceType}
-                required
-              >
-                <option value="">Selecione um tipo</option>
-                {relationshipFormData.sourceType &&
-                  NODE_TYPES_CONFIG[relationshipFormData.sourceType] &&
-                  NODE_TYPES_CONFIG[
-                    relationshipFormData.sourceType
-                  ].allowedRelationships.map((type) => (
+        <TabsContent value="node" className="mt-4">
+          {/* Node Form */}
+          <form onSubmit={handleSubmitNode} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Tipo de Nó
+                </label>
+                <select
+                  value={selectedNodeType}
+                  onChange={(e) => {
+                    const selectedType = e.target.value;
+                    setSelectedNodeType(selectedType);
+                    // Reset the form data when the node type changes
+                    setNodeFormData({
+                      name: "",
+                      label: selectedType,
+                      properties: {
+                        ...NODE_TYPES_CONFIG[selectedType].properties,
+                      },
+                    });
+                  }}
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                >
+                  {Object.keys(NODE_TYPES_CONFIG).map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
                   ))}
-              </select>
-              {!relationshipFormData.sourceType && (
-                <p className="text-xs text-[var(--muted)] mt-1">
-                  Selecione um nó de origem para ver os tipos de relacionamento
-                  disponíveis
-                </p>
-              )}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Nome
+                </label>
+                <input
+                  type="text"
+                  value={nodeFormData.name}
+                  onChange={(e) =>
+                    setNodeFormData({ ...nodeFormData, name: e.target.value })
+                  }
+                  placeholder="Nome do nó"
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                  required
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Nó de Destino
+            <div className="border-t border-gray-200 dark:border-gray-800 my-4 pt-4">
+              <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
+                Propriedades
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Standard properties based on node type */}
+                {Object.entries(nodeFormData.properties).map(([key, value]) => (
+                  <div key={key} className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 capitalize">
+                      {key}
+                    </label>
+                    {getInputType(key, selectedNodeType) === "textarea" ? (
+                      <textarea
+                        value={value}
+                        onChange={(e) =>
+                          handlePropertyChange(key, e.target.value)
+                        }
+                        placeholder={`${key}`}
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                        rows={3}
+                      />
+                    ) : getInputType(key, selectedNodeType) === "select" ? (
+                      <select
+                        value={value}
+                        onChange={(e) =>
+                          handlePropertyChange(key, e.target.value)
+                        }
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      >
+                        {getOptions(key, selectedNodeType).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : getInputType(key, selectedNodeType) === "date" ? (
+                      <input
+                        type="date"
+                        value={value}
+                        onChange={(e) =>
+                          handlePropertyChange(key, e.target.value)
+                        }
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={(e) =>
+                          handlePropertyChange(key, e.target.value)
+                        }
+                        placeholder={`${key}`}
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Properties */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Propriedades Personalizadas
+                </h3>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setShowCustomPropertiesForm(!showCustomPropertiesForm)
+                  }
+                >
+                  {showCustomPropertiesForm ? "Ocultar" : "Adicionar"}
+                </Button>
+              </div>
+
+              {showCustomPropertiesForm && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                        Nome da Propriedade
+                      </label>
+                      <input
+                        type="text"
+                        value={customPropertyKey}
+                        onChange={(e) => setCustomPropertyKey(e.target.value)}
+                        placeholder="Nome da propriedade"
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                        Valor da Propriedade
+                      </label>
+                      <input
+                        type="text"
+                        value={customPropertyValue}
+                        onChange={(e) => setCustomPropertyValue(e.target.value)}
+                        placeholder="Valor da propriedade"
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleAddCustomProperty}
+                      disabled={!customPropertyKey.trim()}
+                    >
+                      Adicionar Propriedade
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                {Object.entries(customProperties).map(([key, value]) => (
+                  <div key={key} className="relative">
+                    <div className="flex items-center space-x-1">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 capitalize">
+                        {key}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomProperty(key)}
+                        className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(e) =>
+                        setCustomProperties({
+                          ...customProperties,
+                          [key]: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-700"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg
+                        className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Tecendo...
+                    </span>
+                  ) : (
+                    "Tecer Nó"
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        </TabsContent>
+
+        <TabsContent value="relationship" className="mt-4">
+          {/* Relationship Form */}
+          <form onSubmit={handleSubmitRelationship} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Nó de Origem
+                </label>
+                <Combobox
+                  options={nodeOptions}
+                  value={relationshipFormData.source}
+                  onChange={(value) => {
+                    // Find the selected node to get its type
+                    const selectedNode = existingNodes.find(
+                      (node) => node.id === value
+                    );
+
+                    setRelationshipFormData({
+                      ...relationshipFormData,
+                      source: value,
+                      sourceType: selectedNode?.label || "",
+                    });
+
+                    // Update relationship types if both nodes are selected
+                    if (
+                      selectedNode?.label &&
+                      relationshipFormData.targetType
+                    ) {
+                      const validTypes = getValidRelationshipTypes(
+                        selectedNode.label,
+                        relationshipFormData.targetType
+                      );
+                      setRelationshipTypes(validTypes);
+                      setRelationshipFormData((prev) => ({
+                        ...prev,
+                        type: validTypes.length > 0 ? validTypes[0] : "",
+                      }));
+                    }
+                  }}
+                  placeholder="Selecione um nó de origem"
+                  searchPlaceholder="Buscar nó..."
+                  emptyMessage="Nenhum nó encontrado."
+                  groupHeading="Nós"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Nó de Destino
+                </label>
+                <Combobox
+                  options={targetNodeOptions}
+                  value={relationshipFormData.target}
+                  onChange={(value) => {
+                    // Find the selected node to get its type
+                    const selectedNode = existingNodes.find(
+                      (node) => node.id === value
+                    );
+
+                    setRelationshipFormData({
+                      ...relationshipFormData,
+                      target: value,
+                      targetType: selectedNode?.label || "",
+                    });
+
+                    // Update relationship types if both nodes are selected
+                    if (
+                      relationshipFormData.sourceType &&
+                      selectedNode?.label
+                    ) {
+                      const validTypes = getValidRelationshipTypes(
+                        relationshipFormData.sourceType,
+                        selectedNode.label
+                      );
+                      setRelationshipTypes(validTypes);
+                      setRelationshipFormData((prev) => ({
+                        ...prev,
+                        type: validTypes.length > 0 ? validTypes[0] : "",
+                      }));
+                    }
+                  }}
+                  placeholder="Selecione um nó de destino"
+                  searchPlaceholder="Buscar nó..."
+                  emptyMessage="Nenhum nó encontrado."
+                  groupHeading="Nós"
+                  disabled={!relationshipFormData.source}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                Tipo de Relação
               </label>
-              <select
-                className="w-full p-2 border border-[var(--card-border)] rounded-md bg-[var(--background)]"
-                value={relationshipFormData.target}
-                onChange={(e) =>
+              <Combobox
+                options={relationshipTypeOptions}
+                value={relationshipFormData.type}
+                onChange={(value) => {
                   setRelationshipFormData({
                     ...relationshipFormData,
-                    target: e.target.value,
-                    targetType:
-                      existingNodes.find(
-                        (node) => (node.id.low || node.id) == e.target.value
-                      )?.label || "",
-                  })
-                }
-                required
-              >
-                <option value="">Selecione um nó</option>
-                {existingNodes.map((node) => (
-                  <option
-                    key={`target-${node.id.low || node.id}`}
-                    value={node.id.low || node.id}
-                  >
-                    {node.properties.name} ({node.label})
-                  </option>
-                ))}
-              </select>
+                    type: value,
+                  });
+                }}
+                placeholder="Selecione o tipo de relação"
+                searchPlaceholder="Buscar tipo..."
+                emptyMessage="Nenhum tipo de relação disponível."
+                disabled={relationshipTypes.length === 0}
+              />
             </div>
 
-            <button
-              type="submit"
-              className="w-full px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors"
-              disabled={isLoading || !relationshipFormData.type}
-            >
-              {isLoading ? "Adicionando..." : "Adicionar Relacionamento"}
-            </button>
-          </div>
-        </form>
-      )}
+            <div className="mt-6 flex justify-end">
+              <button
+                type="submit"
+                disabled={loading || relationshipTypes.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-700"
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg
+                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Tecendo...
+                  </span>
+                ) : (
+                  "Tecer Conexão"
+                )}
+              </button>
+            </div>
+          </form>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

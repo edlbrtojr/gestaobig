@@ -3,51 +3,76 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Light theme (default) */
+/* Modern color scheme - Light theme (default) */
 :root {
-  --card-background: #ffffff;
-  --card-border: #e5e7eb;
-  --primary: oklch(0.205 0 0);
-  --primary-hover: #2563eb;
-  --muted: oklch(0.97 0 0);
-  --muted-background: #f9fafb;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --link: #2563eb;
-  --link-hover: #1d4ed8;
-  --warning-background: #fef3c7;
-  --warning-foreground: #92400e;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: oklch(0.985 0.01 var(--p, 0));
+  --foreground: oklch(0.15 0.02 var(--p, 240));
+
+  --muted: oklch(0.96 0.015 var(--p, 240));
+  --muted-foreground: oklch(0.535 0.02 var(--p, 240));
+
+  --popover: oklch(0.99 0.01 var(--p, 0));
+  --popover-foreground: oklch(0.15 0.02 var(--p, 240));
+
+  --card: oklch(0.99 0.01 var(--p, 0));
+  --card-foreground: oklch(0.15 0.02 var(--p, 240));
+
+  --border: oklch(0.92 0.015 var(--p, 240));
+  --input: oklch(0.92 0.015 var(--p, 240));
+
+  --primary: oklch(0.5 0.18 var(--p, 250));
+  --primary-foreground: oklch(0.98 0.005 var(--p, 0));
+
+  --secondary: oklch(0.96 0.015 var(--p, 240));
+  --secondary-foreground: oklch(0.35 0.09 var(--p, 240));
+
+  --accent: oklch(0.98 0.015 var(--p, 250));
+  --accent-foreground: oklch(0.28 0.12 var(--p, 250));
+
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0.005 var(--p, 0));
+
+  --ring: oklch(0.7 0.1 var(--p, 250));
+
+  /* Extra ui elements */
+  --success: oklch(0.55 0.178 148);
+  --warning: oklch(0.7 0.18 80);
+  --danger: oklch(0.65 0.2 25);
+
+  --link: oklch(0.48 0.18 var(--p, 250));
+  --link-hover: oklch(0.4 0.22 var(--p, 250));
+
+  --radius: 0.5rem;
+
+  --chart-1: oklch(0.6 0.22 var(--p, 250));
+  --chart-2: oklch(0.6 0.2 148);
+  --chart-3: oklch(0.5 0.18 200);
+  --chart-4: oklch(0.7 0.18 80);
+  --chart-5: oklch(0.72 0.19 60);
+
+  --sidebar: oklch(0.985 0.01 var(--p, 0));
+  --sidebar-foreground: oklch(0.15 0.02 var(--p, 240));
+  --sidebar-primary: oklch(0.5 0.18 var(--p, 250));
+  --sidebar-primary-foreground: oklch(0.98 0.005 var(--p, 0));
+  --sidebar-accent: oklch(0.98 0.015 var(--p, 250));
+  --sidebar-accent-foreground: oklch(0.28 0.12 var(--p, 250));
+  --sidebar-border: oklch(0.92 0.015 var(--p, 240));
+  --sidebar-ring: oklch(0.7 0.1 var(--p, 250));
+}
+
+/* Adicionando transição para mudança de tema */
+html {
+  transition: background-color 0s, color 0s, border-color 0s;
+}
+
+/* Classe aplicada durante a troca de tema */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out, fill 0.3s ease-in-out,
+    stroke 0.3s ease-in-out !important;
 }
 
 @theme inline {
@@ -84,72 +109,57 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Dark theme for system preference */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --card-background: #1a1a1a;
-    --card-border: #2a2a2a;
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
-    --muted: #9ca3af;
-    --muted-background: #171717;
-    --success: #059669;
-    --warning: #d97706;
-    --danger: #dc2626;
-    --link: #60a5fa;
-    --link-hover: #93c5fd;
-    --warning-background: #422006;
-    --warning-foreground: #fbbf24;
-  }
-}
-
-body {
-  font-family: var(--font-sans, Arial, sans-serif);
-}
-
-/* Dark theme for class or data-theme attribute */
+/* Dark theme */
 .dark,
 [data-theme="dark"] {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --card-background: #1a1a1a;
-  --card-border: #2a2a2a;
-  --primary: #3b82f6;
-  --primary-hover: #60a5fa;
-  --muted: #9ca3af;
-  --muted-background: #171717;
-  --success: #059669;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --link: #60a5fa;
-  --link-hover: #93c5fd;
-  --warning-background: #422006;
-  --warning-foreground: #fbbf24;
-}
+  --background: oklch(0.12 0.01 var(--p, 240));
+  --foreground: oklch(0.98 0.01 var(--p, 0));
 
-/* Light theme for explicit selection through attribute */
-[data-theme="light"] {
-  --background: #ffffff;
-  --foreground: #171717;
-  --card-background: #ffffff;
-  --card-border: #e5e7eb;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --muted: #6b7280;
-  --muted-background: #f9fafb;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --link: #2563eb;
-  --link-hover: #1d4ed8;
-  --warning-background: #fef3c7;
-  --warning-foreground: #92400e;
+  --muted: oklch(0.18 0.02 var(--p, 240));
+  --muted-foreground: oklch(0.7 0.025 var(--p, 240));
+
+  --popover: oklch(0.13 0.015 var(--p, 240));
+  --popover-foreground: oklch(0.98 0.01 var(--p, 0));
+
+  --card: oklch(0.13 0.015 var(--p, 240));
+  --card-foreground: oklch(0.98 0.01 var(--p, 0));
+
+  --border: oklch(0.2 0.02 var(--p, 240));
+  --input: oklch(0.2 0.02 var(--p, 240));
+
+  --primary: oklch(0.62 0.2 var(--p, 250));
+  --primary-foreground: oklch(0.12 0.01 var(--p, 240));
+
+  --secondary: oklch(0.18 0.02 var(--p, 240));
+  --secondary-foreground: oklch(0.9 0.02 var(--p, 0));
+
+  --accent: oklch(0.18 0.02 var(--p, 240));
+  --accent-foreground: oklch(0.9 0.02 var(--p, 0));
+
+  --destructive: oklch(0.64 0.2 25);
+  --destructive-foreground: oklch(0.98 0.005 var(--p, 0));
+
+  --ring: oklch(0.62 0.2 var(--p, 250));
+
+  /* Extra ui elements */
+  --success: oklch(0.55 0.178 148);
+  --warning: oklch(0.7 0.18 80);
+  --danger: oklch(0.64 0.2 25);
+
+  --link: oklch(0.65 0.2 var(--p, 250));
+  --link-hover: oklch(0.72 0.22 var(--p, 250));
+
+  --chart-1: oklch(0.7 0.22 var(--p, 250));
+  --chart-2: oklch(0.65 0.2 148);
+  --chart-3: oklch(0.6 0.18 200);
+  --chart-4: oklch(0.75 0.18 80);
+  --chart-5: oklch(0.77 0.19 60);
 }
 
 html,
@@ -157,29 +167,63 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
+  min-height: 100vh;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* Custom focus styles */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Base styles */
+* {
+  @apply border-border;
+}
+
+body {
+  font-family: var(
+    --font-sans,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto
+  );
+  line-height: 1.5;
+  background: var(--background);
+  color: var(--foreground);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* SVG styling to ensure proper graph rendering */
-svg {
+.graph-container svg {
   width: 100%;
   height: 100%;
   display: block;
 }
 
 /* Additional styles for the graph container */
-[style*="position: relative"] > div {
+.graph-container [style*="position: relative"] > div {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
 }
 
-[style*="position: relative"] > div > svg {
+.graph-container [style*="position: relative"] > div > svg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  background-color: var(--card-background);
+  background-color: transparent; /* Updated to be transparent */
 }
 
 /* Make sure link paths are visible */
@@ -191,6 +235,12 @@ svg {
 /* Ensure nodes are clickable */
 .nodes circle {
   cursor: pointer;
+  transition: stroke-width 0.2s ease, fill-opacity 0.2s ease;
+}
+
+.nodes circle:hover {
+  stroke-width: 2px;
+  fill-opacity: 0.9;
 }
 
 /* Text labels for nodes */
@@ -198,6 +248,7 @@ svg {
   font-size: 12px;
   pointer-events: none;
   user-select: none;
+  font-weight: 500;
 }
 
 /* Fullscreen mode styling */
@@ -208,7 +259,7 @@ svg {
   right: 0;
   bottom: 0;
   z-index: 50;
-  background-color: var(--card-background);
+  background-color: var(--background);
 }
 
 /* Force fullscreen container to take up entire viewport */
@@ -235,45 +286,64 @@ svg {
 
 /* Improve visibility of fullscreen controls */
 [class*="fixed inset-0"] button {
-  opacity: 0.8;
+  opacity: 0.85;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
 }
 
 [class*="fixed inset-0"] button:hover {
   opacity: 1;
+  transform: translateY(-2px);
+}
+
+/* Better animations and transitions */
+.motion-safe\:animate-fadeInUp {
+  animation: fadeInUp 0.3s ease forwards;
+}
+
+.motion-safe\:animate-fadeInDown {
+  animation: fadeInDown 0.3s ease forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shine {
+  to {
+    transform: translateX(200%);
+  }
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
 @layer base {
@@ -283,4 +353,33 @@ svg {
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Add this CSS to target the sidebar trigger icon and make it smaller */
+[data-sidebar="trigger"] svg {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+/* Add this CSS to target the sidebar icons when collapsed to ensure they're centered */
+[data-state="collapsed"] [data-sidebar="menu-button"] {
+  justify-content: center !important;
+  width: 100%;
+}
+
+[data-state="collapsed"] [data-sidebar="menu-button"] > * {
+  display: flex;
+  justify-content: center;
+}
+
+/* Add specific CSS to ensure sidebar menu text is always visible in expanded state */
+[data-state="expanded"] [data-sidebar="menu-button"] span {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Fix any potential issues with text visibility */
+[data-sidebar="menu-button"] > a > span {
+  display: inline-block;
 }

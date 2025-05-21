@@ -15,11 +15,13 @@ type ThemeProviderProps = {
 type ThemeProviderState = {
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  resolvedTheme: "dark" | "light";
 };
 
 const initialState: ThemeProviderState = {
   theme: "system",
   setTheme: () => null,
+  resolvedTheme: "light",
 };
 
 const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
@@ -36,11 +38,43 @@ export default function ThemeProvider({
   disableTransitionOnChange = false,
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(defaultTheme);
+  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("light");
+  const [mounted, setMounted] = useState(false);
 
+  // Ensure correct initial theme before hydration
   useEffect(() => {
-    const root = window.document.documentElement;
+    // Read the theme from localStorage if available
+    const storedTheme = localStorage.getItem("theme") as Theme | null;
+    if (storedTheme) {
+      setTheme(storedTheme);
+    }
 
-    // Remove both class names and data attribute
+    setMounted(true);
+  }, []);
+
+  // Apply theme changes to DOM
+  useEffect(() => {
+    if (!mounted) return;
+
+    const root = window.document.documentElement;
+    let newResolvedTheme: "dark" | "light" = "light";
+
+    // Store theme preference
+    localStorage.setItem("theme", theme);
+
+    // Start smooth transition
+    if (!disableTransitionOnChange) {
+      document.documentElement.classList.add("theme-transition");
+
+      // Remove the transition class after the transition is complete
+      const transitionTimeout = setTimeout(() => {
+        document.documentElement.classList.remove("theme-transition");
+      }, 350); // slightly longer than CSS transition duration
+
+      return () => clearTimeout(transitionTimeout);
+    }
+
+    // Remove existing theme classes first
     root.classList.remove("light", "dark");
     root.removeAttribute("data-theme");
 
@@ -50,23 +84,35 @@ export default function ThemeProvider({
         ? "dark"
         : "light";
 
+      newResolvedTheme = systemTheme;
+
       // Set both class and data-theme attribute for better compatibility
       root.classList.add(systemTheme);
       root.setAttribute("data-theme", systemTheme);
-      return;
+    } else {
+      newResolvedTheme = theme as "dark" | "light";
+
+      // Set both class and data-theme attribute for the selected theme
+      root.classList.add(theme);
+      root.setAttribute("data-theme", theme);
     }
 
-    // Set both class and data-theme attribute for the selected theme
-    root.classList.add(theme);
-    root.setAttribute("data-theme", theme);
-  }, [theme, enableSystem, attribute]);
+    // Update resolved theme
+    setResolvedTheme(newResolvedTheme);
+  }, [theme, enableSystem, attribute, mounted, disableTransitionOnChange]);
 
   const value = {
     theme,
+    resolvedTheme,
     setTheme: (theme: Theme) => {
       setTheme(theme);
     },
   };
+
+  // Avoid hydration mismatch
+  if (!mounted) {
+    return <>{children}</>;
+  }
 
   return (
     <ThemeProviderContext.Provider value={value}>
