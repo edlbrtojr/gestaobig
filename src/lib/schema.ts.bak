@@ -1,0 +1,186 @@
+// Graph schema interfaces
+interface NodeProperty {
+  name: string;
+  type: string;  // string, number, boolean, date, enum
+  required: boolean;
+  defaultValue?: string;
+  options?: string[];  // For enum type
+  description?: string;
+}
+
+interface NodeTypeDefinition {
+  label: string;
+  description: string;
+  properties: NodeProperty[];
+  color?: string;
+  icon?: string;
+}
+
+interface RelationshipTypeDefinition {
+  type: string;
+  description: string;
+  sourceNodeTypes: string[];
+  targetNodeTypes: string[];
+  properties?: NodeProperty[];
+  bidirectional?: boolean;
+}
+
+export interface GraphSchema {
+  nodeTypes: Record<string, NodeTypeDefinition>;
+  relationshipTypes: Record<string, RelationshipTypeDefinition>;
+}
+
+// Default schema as fallback
+const DEFAULT_SCHEMA: GraphSchema = {
+  nodeTypes: {
+    Risco: {
+      label: "Risco",
+      description: "Representa um risco potencial para a organização",
+      properties: [
+        { name: "name", type: "string", required: true },
+        { name: "description", type: "string", required: true },
+        { name: "impact", type: "enum", required: true, defaultValue: "Médio", options: ["Baixo", "Médio", "Alto"] },
+        { name: "area", type: "string", required: false },
+        { name: "company", type: "string", required: true }
+      ],
+      color: "#ff0000"
+    },
+    PlanoDeAcao: {
+      label: "Plano de Ação",
+      description: "Define um conjunto de ações para atingir um objetivo",
+      properties: [
+        { name: "name", type: "string", required: true },
+        { name: "status", type: "enum", required: true, defaultValue: "Planejado", options: ["Planejado", "Em andamento", "Concluído", "Atrasado", "Cancelado"] },
+        { name: "priority", type: "enum", required: true, defaultValue: "Média", options: ["Baixa", "Média", "Alta"] },
+        { name: "responsavel", type: "string", required: false },
+        { name: "company", type: "string", required: true }
+      ],
+      color: "#0088ff"
+    }
+  },
+  relationshipTypes: {
+    AFETA: {
+      type: "AFETA",
+      description: "Indica que um nó afeta outro",
+      sourceNodeTypes: ["Risco"],
+      targetNodeTypes: ["Projeto", "Objetivo", "Departamento"],
+      bidirectional: false
+    },
+    MITIGADO_POR: {
+      type: "MITIGADO_POR",
+      description: "Indica que um risco é mitigado por um plano de ação",
+      sourceNodeTypes: ["Risco"],
+      targetNodeTypes: ["PlanoDeAcao"],
+      bidirectional: false
+    }
+  }
+};
+
+// Load schema from localStorage or use default
+export function getGraphSchema(): GraphSchema {
+  if (typeof window === 'undefined') {
+    return DEFAULT_SCHEMA;
+  }
+  
+  try {
+    const storedSchema = localStorage.getItem('graphSchema');
+    if (storedSchema) {
+      return JSON.parse(storedSchema);
+    }
+  } catch (error) {
+    console.error("Failed to load schema from localStorage:", error);
+  }
+  
+  return DEFAULT_SCHEMA;
+}
+
+// Convert schema to format compatible with add-form
+export function getNodeTypesConfig() {
+  const schema = getGraphSchema();
+  const nodeTypesConfig: Record<string, any> = {};
+  
+  Object.entries(schema.nodeTypes).forEach(([key, nodeType]) => {
+    const properties: Record<string, any> = {};
+    
+    // Convert properties to the format expected by add-form
+    nodeType.properties.forEach(prop => {
+      if (prop.type === 'enum' && prop.defaultValue) {
+        properties[prop.name] = prop.defaultValue;
+      } else if (prop.type === 'boolean' && prop.defaultValue) {
+        properties[prop.name] = prop.defaultValue === 'true';
+      } else if (prop.defaultValue) {
+        properties[prop.name] = prop.defaultValue;
+      } else {
+        properties[prop.name] = '';
+      }
+    });
+    
+    // Get allowed relationships for this node type
+    const allowedRelationships = Object.entries(schema.relationshipTypes)
+      .filter(([_, relType]) => relType.sourceNodeTypes.includes(key))
+      .map(([relKey, _]) => relKey);
+    
+    nodeTypesConfig[key] = {
+      properties,
+      allowedRelationships
+    };
+  });
+  
+  return nodeTypesConfig;
+}
+
+// Get all relationship types
+export function getAllRelationshipTypes() {
+  const schema = getGraphSchema();
+  return Object.keys(schema.relationshipTypes);
+}
+
+// Get valid relationship types between specific node types
+export function getValidRelationshipTypes(sourceType: string, targetType: string): string[] {
+  const schema = getGraphSchema();
+  
+  if (!sourceType || !targetType) return [];
+  
+  return Object.entries(schema.relationshipTypes)
+    .filter(([_, relType]) => {
+      // Check if this relationship can connect these node types
+      return (
+        relType.sourceNodeTypes.includes(sourceType) &&
+        relType.targetNodeTypes.includes(targetType)
+      );
+    })
+    .map(([relKey, _]) => relKey);
+}
+
+// Get common options for property types
+export function getPropertyOptions(propertyName: string, nodeType: string): string[] {
+  const schema = getGraphSchema();
+  
+  if (!nodeType || !schema.nodeTypes[nodeType]) return [];
+  
+  const property = schema.nodeTypes[nodeType].properties.find(p => p.name === propertyName);
+  
+  if (property && property.type === 'enum' && property.options) {
+    return property.options;
+  }
+  
+  return [];
+}
+
+// Get node property definitions
+export function getNodeProperties(nodeType: string): NodeProperty[] {
+  const schema = getGraphSchema();
+  
+  if (!nodeType || !schema.nodeTypes[nodeType]) return [];
+  
+  return schema.nodeTypes[nodeType].properties;
+}
+
+// Get relationship property definitions 
+export function getRelationshipProperties(relType: string): NodeProperty[] {
+  const schema = getGraphSchema();
+  
+  if (!relType || !schema.relationshipTypes[relType]) return [];
+  
+  return schema.relationshipTypes[relType].properties || [];
+} 

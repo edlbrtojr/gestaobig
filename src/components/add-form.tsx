@@ -20,6 +20,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Combobox, ComboboxOption } from "@/components/ui/combobox";
+import { SewingMachineLoader } from "@/components/ui/sewing-machine-loader";
+import { getNodeTypesConfig, getValidRelationshipTypes, getPropertyOptions, getNodeProperties } from "@/lib/schema";
 
 // Define types for node configurations
 interface NodeProperties {
@@ -34,247 +36,6 @@ interface NodeTypeConfig {
 interface NodeTypesConfig {
   [key: string]: NodeTypeConfig;
 }
-
-interface StatusOptions {
-  [key: string]: string[];
-}
-
-interface CommonOptions {
-  status: StatusOptions;
-  [key: string]: string[] | StatusOptions;
-}
-
-// Node types with their standard properties
-const NODE_TYPES_CONFIG: NodeTypesConfig = {
-  Risco: {
-    properties: {
-      description: "",
-      impact: "Médio", // Default value
-      probability: "Média", // Default value
-      area: "",
-      status: "Identificado",
-    },
-    // Allowed relationship types from this node type
-    allowedRelationships: [
-      "AFETA",
-      "MITIGADO_POR",
-      "RELACIONADO_A",
-      "IDENTIFICADO_POR",
-    ],
-  },
-  PlanoDeAcao: {
-    properties: {
-      description: "",
-      deadline: "",
-      status: "Planejado",
-      priority: "Média",
-      responsible: "",
-    },
-    allowedRelationships: [
-      "MITIGA",
-      "IMPLEMENTA",
-      "RESPONSABILIDADE_DE",
-      "POSSUI",
-    ],
-  },
-  Acao: {
-    properties: {
-      description: "",
-      deadline: "",
-      status: "Pendente",
-      responsible: "",
-    },
-    allowedRelationships: ["PARTE_DE", "EXECUTADO_POR", "IMPACTA"],
-  },
-  Estrategia: {
-    properties: {
-      description: "",
-      timeframe: "",
-      status: "Ativa",
-      objective: "",
-    },
-    allowedRelationships: ["ENDEREÇA", "APOIA", "DEPENDE_DE", "ALINHADO_COM"],
-  },
-  Visao: {
-    properties: {
-      description: "",
-      timeframe: "",
-    },
-    allowedRelationships: ["ORIENTA", "SUPORTA"],
-  },
-  Missao: {
-    properties: {
-      description: "",
-    },
-    allowedRelationships: ["FUNDAMENTA", "DIRECIONA"],
-  },
-  Oportunidade: {
-    properties: {
-      description: "",
-      potential: "Médio",
-      timeframe: "",
-      area: "",
-    },
-    allowedRelationships: ["EXPLORADA_POR", "RELACIONADA_A", "CONTRIBUI_PARA"],
-  },
-  Departamento: {
-    properties: {
-      description: "",
-      manager: "",
-      size: "",
-    },
-    allowedRelationships: ["RESPONSÁVEL_POR", "REPORTA_PARA", "GERENCIA"],
-  },
-  Projeto: {
-    properties: {
-      description: "",
-      status: "Em andamento",
-      startDate: "",
-      endDate: "",
-      manager: "",
-    },
-    allowedRelationships: [
-      "CONTRIBUI_PARA",
-      "DEPENDE_DE",
-      "GERENCIADO_POR",
-      "INCLUI",
-    ],
-  },
-  Objetivo: {
-    properties: {
-      description: "",
-      timeframe: "",
-      status: "Ativo",
-      metric: "",
-    },
-    allowedRelationships: ["SUPORTADO_POR", "ALINHADO_COM", "MENSURADO_POR"],
-  },
-  KPI: {
-    properties: {
-      description: "",
-      target: "",
-      current: "",
-      unit: "",
-      frequency: "Mensal",
-    },
-    allowedRelationships: ["MEDE", "RELACIONADO_A"],
-  },
-  Stakeholder: {
-    properties: {
-      description: "",
-      role: "",
-      influence: "Média",
-      interest: "Médio",
-    },
-    allowedRelationships: ["INTERESSADO_EM", "INFLUENCIA", "RESPONDE_POR"],
-  },
-  Tecnologia: {
-    properties: {
-      description: "",
-      version: "",
-      status: "Ativo",
-      vendor: "",
-    },
-    allowedRelationships: ["SUPORTA", "INTEGRADA_COM", "PARTE_DE"],
-  },
-  Produto: {
-    properties: {
-      description: "",
-      status: "Ativo",
-      lifecycle: "Desenvolvimento",
-      manager: "",
-    },
-    allowedRelationships: ["DEPENDENTE_DE", "ENTREGUE_POR", "INCLUI"],
-  },
-  Mercado: {
-    properties: {
-      description: "",
-      size: "",
-      growth: "",
-      region: "",
-    },
-    allowedRelationships: ["INCLUI", "RELACIONADO_A"],
-  },
-  Competidor: {
-    properties: {
-      description: "",
-      size: "",
-      strength: "Médio",
-      threat: "Médio",
-    },
-    allowedRelationships: ["COMPETE_COM", "ATUA_EM", "AMEAÇA"],
-  },
-};
-
-// Property types and their input components
-const PROPERTY_TYPES: { [key: string]: string } = {
-  text: "input",
-  textarea: "textarea",
-  date: "date",
-  select: "select",
-};
-
-// Common property options
-const COMMON_OPTIONS: CommonOptions = {
-  status: {
-    Risco: ["Identificado", "Analisado", "Mitigado", "Aceito", "Fechado"],
-    PlanoDeAcao: [
-      "Planejado",
-      "Em andamento",
-      "Concluído",
-      "Atrasado",
-      "Cancelado",
-    ],
-    Acao: ["Pendente", "Em andamento", "Concluída", "Atrasada", "Cancelada"],
-    Estrategia: ["Ativa", "Em revisão", "Concluída", "Abandonada"],
-    Projeto: [
-      "Planejado",
-      "Em andamento",
-      "Concluído",
-      "Suspenso",
-      "Cancelado",
-    ],
-    Objetivo: ["Ativo", "Concluído", "Revisão", "Abandonado"],
-    Tecnologia: ["Ativo", "Legado", "Em implementação", "Descontinuado"],
-    Produto: ["Ativo", "Em desenvolvimento", "Descontinuado", "Planejado"],
-  },
-  priority: ["Alta", "Média", "Baixa"],
-  impact: ["Alto", "Médio", "Baixo"],
-  probability: ["Alta", "Média", "Baixa"],
-  influence: ["Alta", "Média", "Baixa"],
-  interest: ["Alto", "Médio", "Baixo"],
-  potential: ["Alto", "Médio", "Baixo"],
-  strength: ["Alto", "Médio", "Baixo"],
-  threat: ["Alto", "Médio", "Baixo"],
-  lifecycle: [
-    "Concepção",
-    "Desenvolvimento",
-    "Lançamento",
-    "Crescimento",
-    "Maturidade",
-    "Declínio",
-  ],
-  frequency: [
-    "Diária",
-    "Semanal",
-    "Mensal",
-    "Trimestral",
-    "Semestral",
-    "Anual",
-  ],
-};
-
-// Get all node types
-const NODE_TYPES = Object.keys(NODE_TYPES_CONFIG);
-
-// Get all possible relationship types
-const ALL_RELATIONSHIP_TYPES = [
-  ...new Set(
-    Object.values(NODE_TYPES_CONFIG).flatMap(
-      (config) => config.allowedRelationships
-    )
-  ),
-].sort();
 
 interface NodeFormData {
   name: string;
@@ -295,23 +56,6 @@ interface AddFormProps {
   onAdd?: () => void;
 }
 
-// Get valid relationship types between source and target node types
-const getValidRelationshipTypes = (
-  sourceType: string,
-  targetType: string
-): string[] => {
-  if (!sourceType || !targetType) return [];
-
-  // Get allowed relationships from source node type
-  const allowedRelationships =
-    NODE_TYPES_CONFIG[sourceType]?.allowedRelationships || [];
-
-  // Return all allowed relationships for simplicity
-  // In a more sophisticated system, this would filter by which relationships
-  // can connect specific target node types
-  return allowedRelationships;
-};
-
 // Helper function to safely extract a string ID from a Neo4j node ID
 const getUniqueNodeId = (nodeId: any): string => {
   if (nodeId === null || nodeId === undefined) return "unknown";
@@ -328,11 +72,12 @@ const getUniqueNodeId = (nodeId: any): string => {
 export default function AddForm({ onAdd }: AddFormProps) {
   const router = useRouter();
   const [formType, setFormType] = useState<"node" | "relationship">("node");
-  const [selectedNodeType, setSelectedNodeType] = useState<string>("Risco");
+  const [nodeTypesConfig, setNodeTypesConfig] = useState<NodeTypesConfig>({});
+  const [selectedNodeType, setSelectedNodeType] = useState<string>("");
   const [nodeFormData, setNodeFormData] = useState<NodeFormData>({
     name: "",
-    label: "Risco",
-    properties: { ...NODE_TYPES_CONFIG["Risco"].properties },
+    label: "",
+    properties: {},
   });
   const [customProperties, setCustomProperties] = useState<{
     [key: string]: string;
@@ -357,37 +102,141 @@ export default function AddForm({ onAdd }: AddFormProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [showCustomPropertiesForm, setShowCustomPropertiesForm] =
     useState<boolean>(false);
+  
+  // Cache state for input types and options
+  const [inputTypes, setInputTypes] = useState<Record<string, string>>({});
+  const [selectOptions, setSelectOptions] = useState<Record<string, string[]>>({});
+  
+  // Loading overlay state based on the loading state
+  const loadingType = formType === "node" ? "nó" : "conexão";
 
-  // Fetch existing nodes on component mount
+  // Load node types config and fetch existing nodes on component mount
   useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        // Load node types config from API/localStorage via utility
+        const config = await getNodeTypesConfig();
+        setNodeTypesConfig(config);
+        
+        // Set initial selected node type and form data
+        if (Object.keys(config).length > 0) {
+          const firstNodeType = Object.keys(config)[0];
+          setSelectedNodeType(firstNodeType);
+          setNodeFormData({
+            name: "",
+            label: firstNodeType,
+            properties: { ...config[firstNodeType].properties },
+          });
+        }
+      } catch (error) {
+        console.error("Failed to load node types config:", error);
+        setError("Falha ao carregar configuração de tipos de nós");
+      }
+    };
+    
+    loadConfig();
     fetchExistingNodes();
   }, []);
 
+  // Re-load node types config whenever the form is shown
+  // This ensures it picks up any changes made in the admin settings
+  useEffect(() => {
+    const refreshConfig = async () => {
+      try {
+        const config = await getNodeTypesConfig();
+        setNodeTypesConfig(config);
+        
+        if (Object.keys(config).length > 0 && !selectedNodeType) {
+          const firstNodeType = Object.keys(config)[0];
+          setSelectedNodeType(firstNodeType);
+          setNodeFormData({
+            name: "",
+            label: firstNodeType,
+            properties: { ...config[firstNodeType].properties },
+          });
+        }
+      } catch (error) {
+        console.error("Failed to refresh node types config:", error);
+      }
+    };
+    
+    refreshConfig();
+  }, [formType]);
+
   // Update node properties when label changes
   useEffect(() => {
-    if (nodeFormData.label && NODE_TYPES_CONFIG[nodeFormData.label]) {
+    if (nodeFormData.label && nodeTypesConfig[nodeFormData.label]) {
       setNodeFormData((prevData) => ({
         ...prevData,
-        properties: { ...NODE_TYPES_CONFIG[nodeFormData.label].properties },
+        properties: { ...nodeTypesConfig[nodeFormData.label].properties },
       }));
+      
+      // Reset input types when properties change
+      setInputTypes({});
     }
-  }, [nodeFormData.label]);
-
-  // Update allowed relationship types when source node changes
+  }, [nodeFormData.label, nodeTypesConfig]);
+  
+  // Load input types and options for current properties
   useEffect(() => {
-    if (
-      relationshipFormData.sourceType &&
-      NODE_TYPES_CONFIG[relationshipFormData.sourceType]
-    ) {
-      const allowedRelationships =
-        NODE_TYPES_CONFIG[relationshipFormData.sourceType].allowedRelationships;
-      // Reset relationship type when source changes
-      setRelationshipFormData({
-        ...relationshipFormData,
-        type: allowedRelationships.length > 0 ? allowedRelationships[0] : "",
-      });
-    }
-  }, [relationshipFormData.sourceType]);
+    const loadPropertyDetails = async () => {
+      if (!selectedNodeType) return;
+      
+      // Load input types for all properties
+      const newInputTypes: Record<string, string> = {};
+      const newSelectOptions: Record<string, string[]> = {};
+      
+      const properties = Object.keys(nodeFormData.properties);
+      for (const propertyName of properties) {
+        try {
+          // Get input type
+          const type = await getInputType(propertyName, selectedNodeType);
+          newInputTypes[propertyName] = type;
+          
+          // If it's a select, load options
+          if (type === 'select') {
+            const options = await getOptions(propertyName, selectedNodeType);
+            newSelectOptions[propertyName] = options;
+          }
+        } catch (error) {
+          console.error(`Error loading details for property ${propertyName}:`, error);
+        }
+      }
+      
+      setInputTypes(newInputTypes);
+      setSelectOptions(newSelectOptions);
+    };
+    
+    loadPropertyDetails();
+  }, [selectedNodeType, nodeFormData.properties]);
+
+  // Update allowed relationship types when source and target nodes change
+  useEffect(() => {
+    const updateRelationshipTypes = async () => {
+      if (
+        relationshipFormData.sourceType &&
+        relationshipFormData.targetType
+      ) {
+        try {
+          const validTypes = await getValidRelationshipTypes(
+            relationshipFormData.sourceType,
+            relationshipFormData.targetType
+          );
+          setRelationshipTypes(validTypes);
+          
+          // Reset relationship type when source/target changes
+          setRelationshipFormData((prev) => ({
+            ...prev,
+            type: validTypes.length > 0 ? validTypes[0] : "",
+          }));
+        } catch (error) {
+          console.error("Failed to get valid relationship types:", error);
+          setRelationshipTypes([]);
+        }
+      }
+    };
+    
+    updateRelationshipTypes();
+  }, [relationshipFormData.sourceType, relationshipFormData.targetType]);
 
   const fetchExistingNodes = async () => {
     try {
@@ -459,11 +308,17 @@ export default function AddForm({ onAdd }: AddFormProps) {
         )
       );
 
+      // Add custom properties
+      const finalProperties = {
+        ...cleanedProperties,
+        ...customProperties
+      };
+
       // Log submission data for debugging
       console.log("Submitting node:", {
         name: nodeFormData.name,
         label: nodeFormData.label,
-        properties: cleanedProperties,
+        properties: finalProperties,
       });
 
       const response = await fetch("/api/node", {
@@ -474,7 +329,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
         body: JSON.stringify({
           name: nodeFormData.name,
           label: nodeFormData.label,
-          properties: cleanedProperties,
+          properties: finalProperties,
         }),
       });
 
@@ -515,9 +370,12 @@ export default function AddForm({ onAdd }: AddFormProps) {
       // Reset node form (even though we are switching, it's good practice)
       setNodeFormData({
         name: "",
-        label: NODE_TYPES[0],
-        properties: { ...NODE_TYPES_CONFIG[NODE_TYPES[0]].properties },
+        label: selectedNodeType,
+        properties: { ...nodeTypesConfig[selectedNodeType].properties },
       });
+      
+      // Reset custom properties
+      setCustomProperties({});
     } catch (error) {
       console.error("Error adding node:", error);
       setError(
@@ -599,56 +457,48 @@ export default function AddForm({ onAdd }: AddFormProps) {
     }
   };
 
-  // Helper function to get input type based on property name
-  const getInputType = (propertyName: string, nodeType: string): string => {
-    if (
-      propertyName.includes("date") ||
-      propertyName === "startDate" ||
-      propertyName === "endDate" ||
-      propertyName === "deadline"
-    ) {
-      return "date";
-    }
+  // Helper function to get input type based on property name and definition
+  const getInputType = async (propertyName: string, nodeType: string): Promise<string> => {
+    try {
+      const nodeProps = await getNodeProperties(nodeType);
+      const propDef = nodeProps.find(p => p.name === propertyName);
+      
+      if (propDef) {
+        if (propDef.type === 'date') return 'date';
+        if (propDef.type === 'enum') return 'select';
+        if (propDef.type === 'boolean') return 'checkbox';
+        if (propDef.type === 'string' && propertyName === 'description') return 'textarea';
+        return 'text';
+      }
+      
+      // Fallback logic for custom properties
+      if (
+        propertyName.includes("date") ||
+        propertyName === "startDate" ||
+        propertyName === "endDate" ||
+        propertyName === "deadline"
+      ) {
+        return "date";
+      }
 
-    if (propertyName === "description") {
-      return "textarea";
-    }
-
-    if (
-      propertyName === "status" ||
-      propertyName === "priority" ||
-      propertyName === "impact" ||
-      propertyName === "probability" ||
-      propertyName === "influence" ||
-      propertyName === "interest" ||
-      propertyName === "potential" ||
-      propertyName === "strength" ||
-      propertyName === "threat" ||
-      propertyName === "lifecycle" ||
-      propertyName === "frequency"
-    ) {
-      return "select";
+      if (propertyName === "description") {
+        return "textarea";
+      }
+    } catch (error) {
+      console.error("Failed to get node properties:", error);
     }
 
     return "text";
   };
 
   // Helper function to get options for a select input
-  const getOptions = (propertyName: string, nodeType: string): string[] => {
-    if (
-      propertyName === "status" &&
-      COMMON_OPTIONS.status &&
-      COMMON_OPTIONS.status[nodeType]
-    ) {
-      return COMMON_OPTIONS.status[nodeType];
+  const getOptions = async (propertyName: string, nodeType: string): Promise<string[]> => {
+    try {
+      return await getPropertyOptions(propertyName, nodeType);
+    } catch (error) {
+      console.error("Failed to get property options:", error);
+      return [];
     }
-
-    const options = COMMON_OPTIONS[propertyName];
-    if (Array.isArray(options)) {
-      return options;
-    }
-
-    return [];
   };
 
   // Convert existingNodes to ComboboxOption format
@@ -671,8 +521,20 @@ export default function AddForm({ onAdd }: AddFormProps) {
     })
   );
 
+  // Get all node types for dropdown
+  const nodeTypeOptions = Object.keys(nodeTypesConfig);
+
   return (
-    <div className="w-full p-6">
+    <div className="w-full p-6 relative">
+      {/* Loading overlay with blurred background */}
+      {loading && (
+        <SewingMachineLoader 
+          fullScreen={true}
+          size="lg" 
+          text={`Tecendo ${loadingType}...`}
+        />
+      )}
+      
       {/* Tabs for Form Type Selection */}
       <Tabs
         defaultValue="node"
@@ -744,13 +606,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
                       name: "",
                       label: selectedType,
                       properties: {
-                        ...NODE_TYPES_CONFIG[selectedType].properties,
+                        ...nodeTypesConfig[selectedType]?.properties || {},
                       },
                     });
                   }}
                   className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                 >
-                  {Object.keys(NODE_TYPES_CONFIG).map((type) => (
+                  {nodeTypeOptions.map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
@@ -786,7 +648,18 @@ export default function AddForm({ onAdd }: AddFormProps) {
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 capitalize">
                       {key}
                     </label>
-                    {getInputType(key, selectedNodeType) === "textarea" ? (
+                    {!inputTypes[key] ? (
+                      // Show loading state or fallback while input type is being determined
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={(e) =>
+                          handlePropertyChange(key, e.target.value)
+                        }
+                        placeholder={`${key}`}
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
+                      />
+                    ) : inputTypes[key] === "textarea" ? (
                       <textarea
                         value={value}
                         onChange={(e) =>
@@ -796,7 +669,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                         rows={3}
                       />
-                    ) : getInputType(key, selectedNodeType) === "select" ? (
+                    ) : inputTypes[key] === "select" ? (
                       <select
                         value={value}
                         onChange={(e) =>
@@ -804,13 +677,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         }
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                       >
-                        {getOptions(key, selectedNodeType).map((option) => (
+                        {selectOptions[key]?.map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>
                         ))}
                       </select>
-                    ) : getInputType(key, selectedNodeType) === "date" ? (
+                    ) : inputTypes[key] === "date" ? (
                       <input
                         type="date"
                         value={value}
@@ -925,39 +798,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
               </div>
 
               <div className="mt-6 flex justify-end">
-                <button
+                <Button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-700"
+                  className="min-w-32"
                 >
-                  {loading ? (
-                    <span className="flex items-center gap-2">
-                      <svg
-                        className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      Tecendo...
-                    </span>
-                  ) : (
-                    "Tecer Nó"
-                  )}
-                </button>
+                  Tecer Nó
+                </Button>
               </div>
             </div>
           </form>
@@ -985,22 +832,6 @@ export default function AddForm({ onAdd }: AddFormProps) {
                       source: value,
                       sourceType: selectedNode?.label || "",
                     });
-
-                    // Update relationship types if both nodes are selected
-                    if (
-                      selectedNode?.label &&
-                      relationshipFormData.targetType
-                    ) {
-                      const validTypes = getValidRelationshipTypes(
-                        selectedNode.label,
-                        relationshipFormData.targetType
-                      );
-                      setRelationshipTypes(validTypes);
-                      setRelationshipFormData((prev) => ({
-                        ...prev,
-                        type: validTypes.length > 0 ? validTypes[0] : "",
-                      }));
-                    }
                   }}
                   placeholder="Selecione um nó de origem"
                   searchPlaceholder="Buscar nó..."
@@ -1027,22 +858,6 @@ export default function AddForm({ onAdd }: AddFormProps) {
                       target: value,
                       targetType: selectedNode?.label || "",
                     });
-
-                    // Update relationship types if both nodes are selected
-                    if (
-                      relationshipFormData.sourceType &&
-                      selectedNode?.label
-                    ) {
-                      const validTypes = getValidRelationshipTypes(
-                        relationshipFormData.sourceType,
-                        selectedNode.label
-                      );
-                      setRelationshipTypes(validTypes);
-                      setRelationshipFormData((prev) => ({
-                        ...prev,
-                        type: validTypes.length > 0 ? validTypes[0] : "",
-                      }));
-                    }
                   }}
                   placeholder="Selecione um nó de destino"
                   searchPlaceholder="Buscar nó..."
@@ -1074,39 +889,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
             </div>
 
             <div className="mt-6 flex justify-end">
-              <button
+              <Button
                 type="submit"
                 disabled={loading || relationshipTypes.length === 0}
-                className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-700"
+                className="min-w-32"
               >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg
-                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Tecendo...
-                  </span>
-                ) : (
-                  "Tecer Conexão"
-                )}
-              </button>
+                Tecer Conexão
+              </Button>
             </div>
           </form>
         </TabsContent>

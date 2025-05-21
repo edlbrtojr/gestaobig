@@ -10,11 +10,13 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 - Análise de conexões entre diferentes entidades organizacionais
 - Filtros por tipo de entidade e relacionamentos
 - Interface responsiva e moderna
+- Manipulação dinâmica de nós e relações
+- Registro e manutenção de estratégias organizacionais
 
 ## Tecnologias
 
-- **Frontend**: Next.js 15, React, TypeScript, TailwindCSS
-- **Backend**: Neo4j (Graph Database)
+- **Frontend**: Next.js 15, React, TypeScript, TailwindCSS, ShadCn
+- **Backend**: Neo4j (Graph Database), Next.js API Routes
 - **Visualização**: D3.js
 - **Estilização**: CSS Modules, TailwindCSS
 
@@ -69,6 +71,19 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 - **Zoom**: Use o scroll do mouse para dar zoom in/out no grafo
 - **Arrastar**: Mova nós clicando e arrastando para reorganizar o grafo
 - **Tema**: Alterne entre modo claro e escuro com o botão no topo
+- **Adição de Entidades**: Adicione novas entidades através do formulário específico
+- **Criação de Relações**: Conecte entidades existentes através da interface de relações
+
+## Documentação
+
+Documentação detalhada está disponível na pasta `docs/`:
+
+- [Visão Geral do Sistema](docs/visao-geral.md)
+- [Arquitetura](docs/arquitetura.md)
+- [API Documentação](docs/api.md)
+- [Banco de Dados](docs/banco-dados.md)
+- [Guia de Desenvolvimento](docs/desenvolvimento.md)
+- [Guia de Implantação](docs/implantacao.md)
 
 ## Contribuição
 

@@ -14,108 +14,19 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Combobox, ComboboxOption } from "@/components/ui/combobox";
+import { getAllRelationshipTypes, getRelationshipProperties, getValidRelationshipTypes } from "@/lib/schema";
 
-// Define node types configuration - copied from add-form.tsx
-// Node types with their allowed relationships
-interface NodeTypeConfig {
-  allowedRelationships: string[];
-}
-
-interface NodeTypesConfig {
-  [key: string]: NodeTypeConfig;
-}
-
-// This is a simplified version of the config in add-form.tsx
-const NODE_TYPES_CONFIG: NodeTypesConfig = {
-  Risco: {
-    allowedRelationships: [
-      "AFETA",
-      "MITIGADO_POR",
-      "RELACIONADO_A",
-      "IDENTIFICADO_POR",
-    ],
-  },
-  PlanoDeAcao: {
-    allowedRelationships: [
-      "MITIGA",
-      "IMPLEMENTA",
-      "RESPONSABILIDADE_DE",
-      "POSSUI",
-    ],
-  },
-  Acao: {
-    allowedRelationships: ["PARTE_DE", "EXECUTADO_POR", "IMPACTA"],
-  },
-  Estrategia: {
-    allowedRelationships: ["ENDEREÇA", "APOIA", "DEPENDE_DE", "ALINHADO_COM"],
-  },
-  Visao: {
-    allowedRelationships: ["ORIENTA", "SUPORTA"],
-  },
-  Missao: {
-    allowedRelationships: ["FUNDAMENTA", "DIRECIONA"],
-  },
-  Oportunidade: {
-    allowedRelationships: ["EXPLORADA_POR", "RELACIONADA_A", "CONTRIBUI_PARA"],
-  },
-  Departamento: {
-    allowedRelationships: ["RESPONSÁVEL_POR", "REPORTA_PARA", "GERENCIA"],
-  },
-  Projeto: {
-    allowedRelationships: [
-      "CONTRIBUI_PARA",
-      "DEPENDE_DE",
-      "GERENCIADO_POR",
-      "INCLUI",
-    ],
-  },
-  Objetivo: {
-    allowedRelationships: ["SUPORTADO_POR", "ALINHADO_COM", "MENSURADO_POR"],
-  },
-  KPI: {
-    allowedRelationships: ["MEDE", "RELACIONADO_A"],
-  },
-  Stakeholder: {
-    allowedRelationships: ["INTERESSADO_EM", "INFLUENCIA", "RESPONDE_POR"],
-  },
-  Tecnologia: {
-    allowedRelationships: ["SUPORTA", "INTEGRADA_COM", "PARTE_DE"],
-  },
-  Produto: {
-    allowedRelationships: ["DEPENDENTE_DE", "ENTREGUE_POR", "INCLUI"],
-  },
-  Mercado: {
-    allowedRelationships: ["INCLUI", "RELACIONADO_A"],
-  },
-  Competidor: {
-    allowedRelationships: ["COMPETE_COM", "ATUA_EM", "AMEAÇA"],
-  },
-};
-
-// Get all possible relationship types
-const ALL_RELATIONSHIP_TYPES = [
-  ...new Set(
-    Object.values(NODE_TYPES_CONFIG).flatMap(
-      (config) => config.allowedRelationships
-    )
-  ),
-].sort();
-
-// Get valid relationship types between source and target node types
-const getValidRelationshipTypes = (
-  sourceType: string,
-  targetType: string
-): string[] => {
-  if (!sourceType) return ALL_RELATIONSHIP_TYPES;
-
-  // Get allowed relationships from source node type
-  const allowedRelationships =
-    NODE_TYPES_CONFIG[sourceType]?.allowedRelationships || [];
-
-  // If no specific node type constraints, return all possible types
-  if (allowedRelationships.length === 0) return ALL_RELATIONSHIP_TYPES;
-  
-  return allowedRelationships;
+// Create a simple Textarea component since one doesn't exist in the codebase
+const Textarea = ({
+  className = "",
+  ...props
+}: React.ComponentPropsWithoutRef<"textarea">) => {
+  return (
+    <textarea
+      className={`flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      {...props}
+    />
+  );
 };
 
 interface RelationshipEditFormProps {
@@ -146,8 +57,21 @@ const formatValueForEditing = (value: any): string => {
 const parseValueForSaving = (
   key: string,
   value: string,
-  originalValue: any
+  originalValue: any,
+  propertyType?: string
 ): any => {
+  // If a specific type is provided, use it
+  if (propertyType) {
+    if (propertyType === 'number') {
+      return Number(value);
+    }
+    if (propertyType === 'boolean') {
+      return value === 'true';
+    }
+    // For enum and string, leave as string
+    return value;
+  }
+
   // If original value was a Neo4j integer object, convert back to number
   if (
     originalValue &&
@@ -183,8 +107,20 @@ export default function RelationshipEditForm({
   onDelete,
 }: RelationshipEditFormProps) {
   const [editedType, setEditedType] = useState<string>(relationship.type || "");
+  const [editedProperties, setEditedProperties] = useState<Record<string, any>>(
+    () => {
+      // Create a copy of properties with formatted values
+      const formatted: Record<string, any> = {};
+      for (const [key, value] of Object.entries(relationship.properties || {})) {
+        formatted[key] = value;
+      }
+      return formatted;
+    }
+  );
   const originalType = useRef(relationship.type || "");
+  const originalProperties = useRef(relationship.properties || {});
   const [relationshipTypes, setRelationshipTypes] = useState<string[]>([]);
+  const [relationshipProperties, setRelationshipProperties] = useState<any[]>([]);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -199,24 +135,115 @@ export default function RelationshipEditForm({
 
   // Fetch relationship details including source and target node types on mount
   useEffect(() => {
-    // Skip the API call entirely and just use all relationship types
-    console.log("Setting all available relationship types");
-    setRelationshipTypes(ALL_RELATIONSHIP_TYPES);
-  }, []);
+    const loadData = async () => {
+      await loadRelationshipTypes();
+      await loadRelationshipProperties();
+    };
+    
+    loadData();
+  }, [relationship.type]);
 
-  // Update form changed status when type changes
+  // Load allowed relationship types based on source and target node types
+  const loadRelationshipTypes = async () => {
+    try {
+      const sourceType = typeof relationship.source === 'object' ? relationship.source.label : '';
+      const targetType = typeof relationship.target === 'object' ? relationship.target.label : '';
+      
+      if (sourceType && targetType) {
+        const validTypes = await getValidRelationshipTypes(sourceType, targetType);
+        if (validTypes && validTypes.length > 0) {
+          setRelationshipTypes(validTypes);
+          return;
+        }
+      }
+      
+      // Fallback to all relationship types if specific validation fails
+      const allTypes = await getAllRelationshipTypes();
+      setRelationshipTypes(allTypes || []);
+    } catch (error) {
+      console.error("Error loading relationship types:", error);
+      setRelationshipTypes([]);
+    }
+  };
+  
+  // Load property definitions for the relationship type
+  const loadRelationshipProperties = async () => {
+    try {
+      if (relationship.type) {
+        const properties = await getRelationshipProperties(relationship.type);
+        setRelationshipProperties(properties || []);
+      }
+    } catch (error) {
+      console.error("Error loading relationship properties:", error);
+      setRelationshipProperties([]);
+    }
+  };
+
+  // Update form changed status when type or properties change
   useEffect(() => {
-    const hasChanged = editedType !== originalType.current;
+    const typeChanged = editedType !== originalType.current;
+    
+    const propertiesChanged = Object.keys(editedProperties).some((key) => {
+      const original = originalProperties.current[key];
+      const current = editedProperties[key];
+
+      if (typeof original === "object" && "low" in original) {
+        return original.low.toString() !== formatValueForEditing(current);
+      }
+      return formatValueForEditing(original) !== formatValueForEditing(current);
+    });
+    
+    const hasChanged = typeChanged || propertiesChanged;
     setFormChanged(hasChanged);
 
     // Notify parent component of form change status
     if (onFormChanged) {
       onFormChanged(hasChanged);
     }
-  }, [editedType, onFormChanged]);
+  }, [editedType, editedProperties, onFormChanged]);
 
-  const handleTypeChange = (value: string) => {
+  const handleTypeChange = async (value: string) => {
     setEditedType(value);
+    
+    // Reload property definitions when type changes
+    if (value !== relationship.type) {
+      try {
+        const properties = await getRelationshipProperties(value);
+        setRelationshipProperties(properties || []);
+        
+        // Reset/update properties based on new relationship type
+        const newProperties: Record<string, any> = {};
+        
+        // Initialize properties from schema definitions
+        if (properties && properties.length > 0) {
+          properties.forEach(prop => {
+            if (prop.defaultValue) {
+              newProperties[prop.name] = prop.defaultValue;
+            } else {
+              newProperties[prop.name] = '';
+            }
+          });
+        }
+        
+        // Keep any existing properties that match the new type's schema
+        Object.entries(editedProperties).forEach(([key, value]) => {
+          if (properties.some(p => p.name === key)) {
+            newProperties[key] = value;
+          }
+        });
+        
+        setEditedProperties(newProperties);
+      } catch (error) {
+        console.error("Error loading relationship properties for type:", value, error);
+      }
+    }
+  };
+  
+  const handlePropertyChange = (key: string, value: string) => {
+    setEditedProperties(prev => ({
+      ...prev,
+      [key]: value
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -225,6 +252,26 @@ export default function RelationshipEditForm({
     setError(null);
 
     try {
+      // Parse edited properties to their appropriate formats
+      const processedProperties: Record<string, any> = {};
+      
+      for (const [key, value] of Object.entries(editedProperties)) {
+        const originalValue = originalProperties.current[key];
+        
+        // Find property definition if available
+        const propDef = relationshipProperties.find(p => p.name === key);
+        const propType = propDef?.type;
+        
+        const parsedValue = parseValueForSaving(
+          key,
+          formatValueForEditing(value),
+          originalValue,
+          propType
+        );
+        
+        processedProperties[key] = parsedValue;
+      }
+
       const response = await fetch(`/api/relationship/${relationship.id}`, {
         method: "PUT",
         headers: {
@@ -232,6 +279,7 @@ export default function RelationshipEditForm({
         },
         body: JSON.stringify({
           type: editedType,
+          properties: processedProperties
         }),
       });
 
@@ -296,16 +344,49 @@ export default function RelationshipEditForm({
     onSave({
       ...relationship,
       type: editedType,
+      properties: editedProperties
     });
   };
 
   // Convert relationship types to ComboboxOption format
-  const relationshipTypeOptions: ComboboxOption[] = relationshipTypes.map(
-    (type) => ({
-      value: type,
-      label: type,
-    })
-  );
+  const relationshipTypeOptions: ComboboxOption[] = Array.isArray(relationshipTypes) 
+    ? relationshipTypes.map((type) => ({
+        value: type,
+        label: type,
+      }))
+    : [];
+  
+  // Get input type for property
+  const getInputType = (propertyName: string, value: any) => {
+    // Find property definition if available
+    if (!Array.isArray(relationshipProperties)) {
+      return 'text'; // Default to text if properties not loaded
+    }
+    
+    const propDef = relationshipProperties.find(p => p.name === propertyName);
+    
+    if (propDef) {
+      if (propDef.type === 'date') return 'date';
+      if (propDef.type === 'enum') return 'select';
+      if (propDef.type === 'boolean') return 'checkbox';
+      if (propDef.type === 'string' && (propertyName === 'description' || formatValueForEditing(value).length > 50)) {
+        return 'textarea';
+      }
+      return 'text';
+    }
+    
+    // Fallback to text for unknown properties
+    return 'text';
+  };
+  
+  // Get options for enum properties
+  const getOptions = (propertyName: string) => {
+    if (!Array.isArray(relationshipProperties)) {
+      return [];
+    }
+    const propDef = relationshipProperties.find(p => p.name === propertyName);
+    return propDef?.options || [];
+  };
 
   return (
     <>
@@ -360,6 +441,93 @@ export default function RelationshipEditForm({
             />
           )}
         </div>
+        
+        {/* Relationship properties */}
+        {Array.isArray(relationshipProperties) && relationshipProperties.length > 0 && (
+          <div className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+            <h3 className="text-sm font-medium">Propriedades</h3>
+            
+            <div className="space-y-4">
+              {relationshipProperties.map((prop) => {
+                const value = editedProperties[prop.name] || '';
+                const formattedValue = formatValueForEditing(value);
+                const inputType = getInputType(prop.name, value);
+                const options = inputType === 'select' ? getOptions(prop.name) : [];
+                
+                return (
+                  <div key={prop.name} className="space-y-2">
+                    <Label htmlFor={prop.name} className="text-sm font-medium capitalize">
+                      {prop.name.replace(/_/g, " ")}
+                      {prop.required && <span className="text-red-500 ml-1">*</span>}
+                    </Label>
+                    
+                    {inputType === 'textarea' ? (
+                      <Textarea
+                        id={prop.name}
+                        value={formattedValue}
+                        onChange={(e) => handlePropertyChange(prop.name, e.target.value)}
+                        className="w-full"
+                        rows={3}
+                        disabled={isSubmitting}
+                        required={prop.required}
+                      />
+                    ) : inputType === 'select' && options.length > 0 ? (
+                      <select
+                        id={prop.name}
+                        value={formattedValue}
+                        onChange={(e) => handlePropertyChange(prop.name, e.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isSubmitting}
+                        required={prop.required}
+                      >
+                        <option value="">Selecione...</option>
+                        {options.map((option: string) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : inputType === 'date' ? (
+                      <Input
+                        id={prop.name}
+                        type="date"
+                        value={formattedValue}
+                        onChange={(e) => handlePropertyChange(prop.name, e.target.value)}
+                        className="w-full"
+                        disabled={isSubmitting}
+                        required={prop.required}
+                      />
+                    ) : inputType === 'checkbox' ? (
+                      <div className="flex items-center space-x-2">
+                        <input
+                          id={prop.name}
+                          type="checkbox"
+                          checked={value === true || value === 'true'}
+                          onChange={(e) => handlePropertyChange(prop.name, e.target.checked.toString())}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          disabled={isSubmitting}
+                          required={prop.required}
+                        />
+                        <label htmlFor={prop.name} className="text-sm text-gray-700 dark:text-gray-300">
+                          {value === true || value === 'true' ? 'Yes' : 'No'}
+                        </label>
+                      </div>
+                    ) : (
+                      <Input
+                        id={prop.name}
+                        value={formattedValue}
+                        onChange={(e) => handlePropertyChange(prop.name, e.target.value)}
+                        className="w-full"
+                        disabled={isSubmitting}
+                        required={prop.required}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-start gap-2 text-sm text-red-500 dark:text-red-400">

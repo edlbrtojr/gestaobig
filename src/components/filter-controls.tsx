@@ -2,26 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Node, Relationship } from "@/types/graph";
-
-// Node types with their colors for filtering
-const NODE_TYPES_CONFIG: Record<string, { color: string }> = {
-  Risco: { color: "#FF5252" }, // Red
-  PlanoDeAcao: { color: "#4CAF50" }, // Green
-  Acao: { color: "#2196F3" }, // Blue
-  Estrategia: { color: "#FFC107" }, // Amber
-  Visao: { color: "#9C27B0" }, // Purple
-  Missao: { color: "#673AB7" }, // Deep Purple
-  Oportunidade: { color: "#FF9800" }, // Orange
-  Departamento: { color: "#009688" }, // Teal
-  Projeto: { color: "#3F51B5" }, // Indigo
-  Objetivo: { color: "#E91E63" }, // Pink
-  KPI: { color: "#795548" }, // Brown
-  Stakeholder: { color: "#9E9E9E" }, // Gray
-  Tecnologia: { color: "#00BCD4" }, // Cyan
-  Produto: { color: "#8BC34A" }, // Light Green
-  Mercado: { color: "#FFEB3B" }, // Yellow
-  Competidor: { color: "#FF5722" }, // Deep Orange
-};
+import { getGraphSchema } from "@/lib/schema";
 
 interface FilterControlsProps {
   onFilterChange: (filters: FilterState) => void;
@@ -35,6 +16,8 @@ export interface FilterState {
   connectionsRange: [number, number];
   showIsolatedNodes: boolean;
   company: string;
+  includeConnections: boolean;
+  connectionDepth: number;
 }
 
 export default function FilterControls({
@@ -50,6 +33,47 @@ export default function FilterControls({
 
   // Track if filters have been initialized
   const initialized = useRef(false);
+  
+  // State for node types and their colors from schema
+  const [nodeTypesConfig, setNodeTypesConfig] = useState<Record<string, { color: string }>>({});
+  const [isLoadingSchema, setIsLoadingSchema] = useState(true);
+
+  // Load node types from schema
+  useEffect(() => {
+    const loadNodeTypes = async () => {
+      try {
+        setIsLoadingSchema(true);
+        const schema = await getGraphSchema();
+        const nodeTypesFromSchema: Record<string, { color: string }> = {};
+        
+        // Extract colors from schema
+        Object.entries(schema.nodeTypes).forEach(([key, nodeType]) => {
+          nodeTypesFromSchema[key] = { 
+            color: nodeType.color || "#9E9E9E" // Default to gray if no color specified
+          };
+        });
+        
+        setNodeTypesConfig(nodeTypesFromSchema);
+      } catch (error) {
+        console.error("Failed to load node types from schema:", error);
+        // Fallback to empty object which will be populated from available nodes
+      } finally {
+        setIsLoadingSchema(false);
+      }
+    };
+    
+    loadNodeTypes();
+    
+    // Listen for schema updates
+    const handleSchemaUpdated = () => {
+      loadNodeTypes();
+    };
+    window.addEventListener('schemaUpdated', handleSchemaUpdated);
+    
+    return () => {
+      window.removeEventListener('schemaUpdated', handleSchemaUpdated);
+    };
+  }, []);
 
   // Extract unique companies from nodes
   const availableCompanies = useMemo(() => {
@@ -74,13 +98,35 @@ export default function FilterControls({
     return Array.from(companies).sort();
   }, [nodes]);
 
+  // Discover node types from actual nodes if schema doesn't have them
+  const discoveredNodeTypes = useMemo(() => {
+    if (!nodes || nodes.length === 0) return {};
+    
+    // Create a combined set of node types from schema and actual nodes
+    const combinedNodeTypes: Record<string, { color: string }> = {...nodeTypesConfig};
+    
+    // Add any node types from the data that aren't in the schema
+    nodes.forEach(node => {
+      if (node.label && !combinedNodeTypes[node.label]) {
+        combinedNodeTypes[node.label] = { color: "#9E9E9E" }; // Default gray
+      }
+    });
+    
+    return combinedNodeTypes;
+  }, [nodes, nodeTypesConfig]);
+  
+  // Use either schema node types or discovered node types
+  const effectiveNodeTypes = useMemo(() => {
+    return Object.keys(discoveredNodeTypes).length > 0 ? discoveredNodeTypes : nodeTypesConfig;
+  }, [discoveredNodeTypes, nodeTypesConfig]);
+
   // Memoize default node types filter to prevent recreating on every render
   const defaultNodeTypesFilter = useMemo(() => {
-    return Object.keys(NODE_TYPES_CONFIG).reduce((acc, type) => {
+    return Object.keys(effectiveNodeTypes).reduce((acc, type) => {
       acc[type] = true;
       return acc;
     }, {} as Record<string, boolean>);
-  }, []);
+  }, [effectiveNodeTypes]);
 
   // Find the range of connections - memoized to prevent recalculation on every render
   const connectionsRange = useMemo((): [number, number] => {
@@ -98,7 +144,19 @@ export default function FilterControls({
     connectionsRange: connectionsRange,
     showIsolatedNodes: true,
     company: "SISTEMA FIEAC", // Default to SISTEMA FIEAC
+    includeConnections: false, // Default to not including connections
+    connectionDepth: 1, // Default connection depth is 1
   }));
+  
+  // Update filters when node types change
+  useEffect(() => {
+    if (Object.keys(defaultNodeTypesFilter).length > 0) {
+      setFilters(prev => ({
+        ...prev,
+        nodeTypes: defaultNodeTypesFilter
+      }));
+    }
+  }, [defaultNodeTypesFilter]);
 
   // Track warning message state
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
@@ -274,6 +332,23 @@ export default function FilterControls({
     }));
   };
 
+  // Handle connection toggle change
+  const handleConnectionToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters((prev) => ({
+      ...prev,
+      includeConnections: e.target.checked,
+    }));
+  };
+
+  // Handle connection depth change
+  const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const depth = parseInt(e.target.value, 10);
+    setFilters((prev) => ({
+      ...prev,
+      connectionDepth: isNaN(depth) ? 1 : Math.max(1, depth),
+    }));
+  };
+
   // Reset filters to default state
   const resetFilters = () => {
     setFilters({
@@ -282,6 +357,8 @@ export default function FilterControls({
       connectionsRange: connectionsRange,
       showIsolatedNodes: true,
       company: "SISTEMA FIEAC", // Reset to SISTEMA FIEAC
+      includeConnections: false, // Reset connection toggle
+      connectionDepth: 1, // Reset connection depth
     });
   };
 
@@ -297,10 +374,7 @@ export default function FilterControls({
   useEffect(() => {
     // Only consider company property if the node has one
     // Special case: SISTEMA FIEAC should show all nodes
-    onFilterChange({
-      ...filters,
-      company: filters.company,
-    });
+    onFilterChange(filters);
   }, [filters, onFilterChange]);
 
   return (
@@ -348,6 +422,62 @@ export default function FilterControls({
         </div>
       </div>
 
+      {/* Connection Filters - New Section */}
+      <div className="space-y-2">
+        <label className="flex items-center justify-between text-xs font-medium text-gray-700 dark:text-gray-300">
+          <span>Incluir conexões</span>
+          <div className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              id="include-connections"
+              checked={filters.includeConnections}
+              onChange={handleConnectionToggle}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+          </div>
+        </label>
+        
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {filters.includeConnections 
+            ? "Busca nós e suas conexões até a profundidade selecionada."
+            : "Busca apenas nós que correspondem ao termo pesquisado."}
+        </p>
+
+        {filters.includeConnections && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label htmlFor="connection-depth" className="text-xs text-gray-600 dark:text-gray-400">
+                Profundidade de conexões
+              </label>
+              <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                {filters.connectionDepth}
+              </span>
+            </div>
+            <input
+              type="range"
+              id="connection-depth"
+              min="1"
+              max="5"
+              step="1"
+              value={filters.connectionDepth}
+              onChange={handleDepthChange}
+              className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>1</span>
+              <span>2</span>
+              <span>3</span>
+              <span>4</span>
+              <span>5</span>
+            </div>
+            <p className="text-xs text-blue-500 dark:text-blue-400 italic mt-1">
+              {`Profundidade ${filters.connectionDepth}: mostra nós a até ${filters.connectionDepth} ${filters.connectionDepth === 1 ? 'conexão' : 'conexões'} de distância.`}
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Divider */}
       <div className="border-t border-gray-200 dark:border-gray-800"></div>
       
@@ -368,8 +498,6 @@ export default function FilterControls({
           ))}
         </select>
       </div>
-
-
 
       {/* Node Types Filter */}
       <div className="space-y-2">
@@ -420,7 +548,7 @@ export default function FilterControls({
                     className="inline-block w-3 h-3 rounded-full"
                     style={{
                       backgroundColor:
-                        NODE_TYPES_CONFIG[type]?.color || "#9E9E9E",
+                        effectiveNodeTypes[type]?.color || "#9E9E9E",
                     }}
                   ></span>
                   {type}

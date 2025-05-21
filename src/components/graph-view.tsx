@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { getGraphSchema } from "@/lib/schema"; // Import the schema utility
 
 interface GraphViewProps {
   data: GraphData;
@@ -23,8 +24,8 @@ interface GraphViewProps {
   onRelationshipSelected?: (relationship: any) => void;
 }
 
-// Mapping node types to colors
-const nodeColors: Record<string, string> = {
+// Default fallback colors for nodes (will be overridden by schema values when available)
+const defaultNodeColors: Record<string, string> = {
   Risco: "#F44336", // Red
   PlanoDeAcao: "#4CAF50", // Green
   Acao: "#2196F3", // Blue
@@ -65,6 +66,26 @@ const labelColors: Record<string, string> = {
 
 // Default color for unknown node types
 const defaultColor = "#757575"; // Darker Gray for unknowns
+
+// Function to poll schema from the API endpoint
+const setupSchemaPolling = (callback: () => void) => {
+  // Poll the schema API endpoint
+  const pollSchema = async () => {
+    try {
+      const response = await fetch('/api/schema');
+      if (response.ok) {
+        callback();
+      }
+    } catch (error) {
+      console.error("Error polling schema:", error);
+    }
+  };
+  
+  // Check every 30 seconds
+  const interval = setInterval(pollSchema, 30000);
+  
+  return () => clearInterval(interval);
+};
 
 // Interface for categorized nodes
 interface CategorizedNodes {
@@ -112,6 +133,58 @@ export default function GraphView({
   const dataRef = useRef(data); // Store previous data reference
   const renderingRef = useRef(false); // Track if we're currently rendering
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [nodeColors, setNodeColors] = useState<Record<string, string>>(defaultNodeColors);
+  const [isLoadingColors, setIsLoadingColors] = useState(true);
+
+  // Load node colors from schema
+  const loadNodeColors = async () => {
+    try {
+      setIsLoadingColors(true);
+      const schema = await getGraphSchema();
+      const colors: Record<string, string> = { ...defaultNodeColors };
+      
+      // Extract colors from schema
+      Object.entries(schema.nodeTypes).forEach(([key, nodeType]) => {
+        if (nodeType.color) {
+          // Map both the key and label to the color (in case they differ)
+          colors[key] = nodeType.color;
+          colors[nodeType.label] = nodeType.color;
+        }
+      });
+      
+      setNodeColors(colors);
+      // Force re-initialization of the graph
+      setInitialized(false);
+    } catch (error) {
+      console.error("Failed to load node colors from schema:", error);
+    } finally {
+      setIsLoadingColors(false);
+    }
+  };
+
+  // Add an effect to update node colors when schema changes
+  useEffect(() => {
+    // Handler for custom event
+    const handleSchemaUpdated = () => {
+      loadNodeColors();
+    };
+    
+    // Listen for direct schema update events
+    window.addEventListener('schemaUpdated', handleSchemaUpdated);
+    
+    // Set up polling for schema changes 
+    const cleanupPolling = setupSchemaPolling(() => {
+      loadNodeColors();
+    });
+    
+    // Initial load of colors
+    loadNodeColors();
+    
+    return () => {
+      window.removeEventListener('schemaUpdated', handleSchemaUpdated);
+      cleanupPolling();
+    };
+  }, []);
 
   // Use memo for expensive graph data processing
   const [processedData, nodeMap] = useMemo(() => {
@@ -967,7 +1040,7 @@ export default function GraphView({
         simulationRef.current.stop();
       }
     };
-  }, [data, theme, resolvedTheme, initialized]);
+  }, [data, theme, resolvedTheme, initialized, nodeColors]);
 
   useEffect(() => {
     if (!initialized || !svgRef.current) return;
@@ -1106,6 +1179,49 @@ export default function GraphView({
         .remove();
     }
   };
+  
+  const handleNodeDelete = async (deletedNode: any) => {
+    // Close the edit form
+    setIsEditing(false);
+    // Clear the selected node
+    setSelectedNode(null);
+    
+    // Update the graph to remove the node visually
+    if (svgRef.current) {
+      const nodeId = deletedNode.id;
+      
+      // Remove the node from the visualization
+      d3.select(svgRef.current)
+        .selectAll(".nodes g")
+        .filter((d: any) => d.id === nodeId)
+        .transition()
+        .duration(300)
+        .style("opacity", 0)
+        .remove();
+        
+      // Also remove any connected relationships
+      d3.select(svgRef.current)
+        .selectAll(".links line")
+        .filter((d: any) => d.source.id === nodeId || d.target.id === nodeId)
+        .transition()
+        .duration(300)
+        .style("opacity", 0)
+        .remove();
+        
+      d3.select(svgRef.current)
+        .selectAll(".links text")
+        .filter((d: any) => d.source.id === nodeId || d.target.id === nodeId)
+        .transition()
+        .duration(300)
+        .style("opacity", 0)
+        .remove();
+    }
+    
+    // Notify parent component
+    if (onNodeSelected) {
+      onNodeSelected(null);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full w-full relative isolate">
@@ -1228,6 +1344,7 @@ export default function GraphView({
                 onSave={handleNodeUpdate}
                 onCancel={() => setIsEditing(false)}
                 onFormChanged={setFormChanged}
+                onDelete={handleNodeDelete}
               />
             </div>
           )}
