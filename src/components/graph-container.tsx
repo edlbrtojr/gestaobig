@@ -12,6 +12,7 @@ interface GraphContainerProps {
   data: GraphData;
   onNodeSelected?: (node: any) => void;
   onRelationshipSelected?: (relationship: any) => void;
+  searchTerm?: string;
 }
 
 // Using memo to prevent unnecessary re-renders when props haven't changed
@@ -19,7 +20,8 @@ const GraphContainer = memo(
   function GraphContainerInner({ 
     data, 
     onNodeSelected,
-    onRelationshipSelected 
+    onRelationshipSelected,
+    searchTerm
   }: GraphContainerProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
@@ -191,6 +193,17 @@ const GraphContainer = memo(
 
         // Calculate time delta for smooth animation regardless of framerate
         const currentTime = timestamp;
+        
+        // Simple frame rate limiting - only update every ~100ms (10fps)
+        // This significantly reduces CPU usage while keeping animation smooth enough
+        if (timestamp - timeRef.current < 100) {
+          // Skip this frame if not enough time has passed
+          animationRef.current = requestAnimationFrame(animateDots);
+          return;
+        }
+        
+        // Update time reference for frame limiting
+        timeRef.current = timestamp;
 
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -406,6 +419,7 @@ const GraphContainer = memo(
               data={data} 
               onNodeSelected={onNodeSelected} 
               onRelationshipSelected={onRelationshipSelected}
+              searchHighlight={searchTerm}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full">
@@ -431,10 +445,11 @@ const GraphContainer = memo(
   (prevProps, nextProps) => {
     // Custom comparison function to prevent unnecessary rerenders
     // Only rerender if the data nodes or relationships actually changed
+    // or if the search term changed
     return (
       prevProps.data.nodes.length === nextProps.data.nodes.length &&
-      prevProps.data.relationships.length ===
-        nextProps.data.relationships.length
+      prevProps.data.relationships.length === nextProps.data.relationships.length &&
+      prevProps.searchTerm === nextProps.searchTerm
     );
   }
 );

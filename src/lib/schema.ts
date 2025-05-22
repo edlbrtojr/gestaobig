@@ -43,7 +43,7 @@ const DEFAULT_SCHEMA: GraphSchema = {
         { name: "area", type: "string", required: false },
         { name: "company", type: "string", required: true }
       ],
-      color: "#ff0000"
+      color: "#FF5252"
     },
     PlanoDeAcao: {
       label: "Plano de Ação",
@@ -55,7 +55,7 @@ const DEFAULT_SCHEMA: GraphSchema = {
         { name: "responsavel", type: "string", required: false },
         { name: "company", type: "string", required: true }
       ],
-      color: "#0088ff"
+      color: "#4CAF50"
     }
   },
   relationshipTypes: {

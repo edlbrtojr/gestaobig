@@ -94,19 +94,10 @@ export default function GraphPage() {
         return data;
       }
 
-      // Filter nodes based on search term and node types
+      // Filter nodes based on node types and company (NOT search term anymore)
       let filteredNodes = data.nodes.filter((node) => {
         // Check if node type is selected in filters
         if (!filters.nodeTypes[node.label]) return false;
-
-        // Check if node name contains search term (case insensitive)
-        if (filters.search) {
-          // Guard against undefined or missing name property
-          const nodeName = node.properties?.name || '';
-          if (!nodeName.toLowerCase().includes(filters.search.toLowerCase())) {
-            return false;
-          }
-        }
 
         // Handle company filter: if SISTEMA FIEAC is selected, show all nodes
         // Otherwise only show nodes that have the selected company (accounting for comma-separated values)
@@ -205,25 +196,9 @@ export default function GraphPage() {
     try {
       console.log("Fetching graph data...");
       
-      // Build URL with search parameters
+      // Build URL with cache-busting parameter
       const params = new URLSearchParams();
-      
-      // Add cache-busting parameter
       params.append('t', Date.now().toString());
-      
-      // Add search parameters if we have current filters
-      if (currentFilters) {
-        // If there's a search term, add it to parameters
-        if (currentFilters.search) {
-          params.append('search', currentFilters.search);
-          
-          // If includeConnections is true, add it and the connection depth
-          if (currentFilters.includeConnections) {
-            params.append('includeConnections', 'true');
-            params.append('connectionDepth', currentFilters.connectionDepth.toString());
-          }
-        }
-      }
       
       // Make the API request with the parameters
       const response = await fetch(`/api/graph?${params.toString()}`);
@@ -312,33 +287,14 @@ export default function GraphPage() {
         // Update the current filters
         setCurrentFilters(filters);
 
-        // If we have a search term and includeConnections is true, 
-        // we need to fetch new data from the API to get the connected nodes
-        if (filters.search && filters.includeConnections) {
-          console.log("Search term with connections, fetching data from API");
-          fetchGraphData();
-          return;
-        } else if (
-          // If the previous filter had includeConnections true and search term,
-          // but now one of these changed, we need to fetch new data
-          currentFilters?.search && 
-          currentFilters?.includeConnections && 
-          (!filters.search || !filters.includeConnections)
-        ) {
-          console.log("Search or connections setting changed, fetching new data");
-          fetchGraphData();
-          return;
-        }
-
-        // Apply the filters locally if there's no search with connections
-        // or if we're not changing from a search with connections state
+        // Apply the filters locally
         if (graphData.nodes.length > 0) {
           const filteredResult = computeFilteredData(filters);
           setFilteredData(filteredResult);
         }
       }, 250); // 250ms debounce
     },
-    [graphData, computeFilteredData, currentFilters, fetchGraphData]
+    [graphData, computeFilteredData]
   );
 
   // Handle node selection in the graph
@@ -535,6 +491,7 @@ export default function GraphPage() {
                   data={filteredData}
                   onNodeSelected={handleNodeSelected}
                   onRelationshipSelected={handleRelationshipSelected}
+                  searchTerm={currentFilters?.search}
                 />
               </div>
             </div>

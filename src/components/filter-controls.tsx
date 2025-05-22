@@ -16,8 +16,6 @@ export interface FilterState {
   connectionsRange: [number, number];
   showIsolatedNodes: boolean;
   company: string;
-  includeConnections: boolean;
-  connectionDepth: number;
 }
 
 export default function FilterControls({
@@ -144,8 +142,6 @@ export default function FilterControls({
     connectionsRange: connectionsRange,
     showIsolatedNodes: true,
     company: "SISTEMA FIEAC", // Default to SISTEMA FIEAC
-    includeConnections: false, // Default to not including connections
-    connectionDepth: 1, // Default connection depth is 1
   }));
   
   // Update filters when node types change
@@ -332,20 +328,11 @@ export default function FilterControls({
     }));
   };
 
-  // Handle connection toggle change
-  const handleConnectionToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle company filter change
+  const handleCompanyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setFilters((prev) => ({
       ...prev,
-      includeConnections: e.target.checked,
-    }));
-  };
-
-  // Handle connection depth change
-  const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const depth = parseInt(e.target.value, 10);
-    setFilters((prev) => ({
-      ...prev,
-      connectionDepth: isNaN(depth) ? 1 : Math.max(1, depth),
+      company: e.target.value,
     }));
   };
 
@@ -356,18 +343,8 @@ export default function FilterControls({
       nodeTypes: defaultNodeTypesFilter,
       connectionsRange: connectionsRange,
       showIsolatedNodes: true,
-      company: "SISTEMA FIEAC", // Reset to SISTEMA FIEAC
-      includeConnections: false, // Reset connection toggle
-      connectionDepth: 1, // Reset connection depth
+      company: "SISTEMA FIEAC",
     });
-  };
-
-  // Handle company filter change
-  const handleCompanyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters((prev) => ({
-      ...prev,
-      company: e.target.value,
-    }));
   };
 
   // Apply filters to parent component (actual filtering logic happens in the parent)
@@ -422,65 +399,6 @@ export default function FilterControls({
         </div>
       </div>
 
-      {/* Connection Filters - New Section */}
-      <div className="space-y-2">
-        <label className="flex items-center justify-between text-xs font-medium text-gray-700 dark:text-gray-300">
-          <span>Incluir conexões</span>
-          <div className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              id="include-connections"
-              checked={filters.includeConnections}
-              onChange={handleConnectionToggle}
-              className="sr-only peer"
-            />
-            <div className="w-9 h-5 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-          </div>
-        </label>
-        
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {filters.includeConnections 
-            ? "Busca nós e suas conexões até a profundidade selecionada."
-            : "Busca apenas nós que correspondem ao termo pesquisado."}
-        </p>
-
-        {filters.includeConnections && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label htmlFor="connection-depth" className="text-xs text-gray-600 dark:text-gray-400">
-                Profundidade de conexões
-              </label>
-              <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
-                {filters.connectionDepth}
-              </span>
-            </div>
-            <input
-              type="range"
-              id="connection-depth"
-              min="1"
-              max="5"
-              step="1"
-              value={filters.connectionDepth}
-              onChange={handleDepthChange}
-              className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
-            />
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>1</span>
-              <span>2</span>
-              <span>3</span>
-              <span>4</span>
-              <span>5</span>
-            </div>
-            <p className="text-xs text-blue-500 dark:text-blue-400 italic mt-1">
-              {`Profundidade ${filters.connectionDepth}: mostra nós a até ${filters.connectionDepth} ${filters.connectionDepth === 1 ? 'conexão' : 'conexões'} de distância.`}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Divider */}
-      <div className="border-t border-gray-200 dark:border-gray-800"></div>
-      
       {/* Company Filter Dropdown */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">

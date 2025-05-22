@@ -22,6 +22,7 @@ interface GraphViewProps {
   data: GraphData;
   onNodeSelected?: (node: any) => void;
   onRelationshipSelected?: (relationship: any) => void;
+  searchHighlight?: string;
 }
 
 // Default fallback colors for nodes (will be overridden by schema values when available)
@@ -49,23 +50,25 @@ const labelColors: Record<string, string> = {
   Risco: "#FFFFFF", // White on Red
   PlanoDeAcao: "#FFFFFF", // White on Green
   Acao: "#FFFFFF", // White on Blue
-  Estrategia: "#000000", // Black on Amber/Yellow
+  Estrategia: "#FFFFFF", // White on Amber/Yellow
   Visao: "#FFFFFF", // White on Purple
   Missao: "#FFFFFF", // White on Deep Purple
-  Oportunidade: "#000000", // Black on Orange
+  Oportunidade: "#FFFFFF", // White on Orange
   Departamento: "#FFFFFF", // White on Teal
   Projeto: "#FFFFFF", // White on Indigo
   Objetivo: "#FFFFFF", // White on Pink
   KPI: "#FFFFFF", // White on Brown
-  Stakeholder: "#FFFFFF", // White on Gray
-  Tecnologia: "#000000", // Black on Cyan
+  Stakeholder: "#FFFFFF", // White on Light Gray
+  Tecnologia: "#FFFFFF", // White on Cyan
   Produto: "#FFFFFF", // White on Light Green
-  Mercado: "#000000", // Black on Yellow
+  Mercado: "#FFFFFF", // White on Yellow
   Competidor: "#FFFFFF", // White on Deep Orange
 };
 
 // Default color for unknown node types
 const defaultColor = "#757575"; // Darker Gray for unknowns
+// Default label color for unknown node types
+const defaultLabelColor = "#FFFFFF"; // White for unknown types
 
 // Function to poll schema from the API endpoint
 const setupSchemaPolling = (callback: () => void) => {
@@ -81,8 +84,8 @@ const setupSchemaPolling = (callback: () => void) => {
     }
   };
   
-  // Check every 30 seconds
-  const interval = setInterval(pollSchema, 30000);
+  // Check every 5 minutes instead of 30 seconds to reduce refresh frequency
+  const interval = setInterval(pollSchema, 300000);
   
   return () => clearInterval(interval);
 };
@@ -115,7 +118,8 @@ const formatValue = (value: any): string => {
 export default function GraphView({ 
   data, 
   onNodeSelected,
-  onRelationshipSelected 
+  onRelationshipSelected,
+  searchHighlight 
 }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
@@ -141,20 +145,35 @@ export default function GraphView({
     try {
       setIsLoadingColors(true);
       const schema = await getGraphSchema();
-      const colors: Record<string, string> = { ...defaultNodeColors };
+      const newColors: Record<string, string> = { ...defaultNodeColors };
       
       // Extract colors from schema
       Object.entries(schema.nodeTypes).forEach(([key, nodeType]) => {
         if (nodeType.color) {
           // Map both the key and label to the color (in case they differ)
-          colors[key] = nodeType.color;
-          colors[nodeType.label] = nodeType.color;
+          newColors[key] = nodeType.color;
+          newColors[nodeType.label] = nodeType.color;
         }
       });
       
-      setNodeColors(colors);
-      // Force re-initialization of the graph
-      setInitialized(false);
+      // Check if colors actually changed before updating state
+      let colorsChanged = false;
+      
+      // Only check keys that exist in either object
+      const allKeys = new Set([...Object.keys(nodeColors), ...Object.keys(newColors)]);
+      
+      for (const key of allKeys) {
+        if (nodeColors[key] !== newColors[key]) {
+          colorsChanged = true;
+          break;
+        }
+      }
+      
+      if (colorsChanged) {
+        setNodeColors(newColors);
+        // Only force re-initialization if colors actually changed
+        setInitialized(false);
+      }
     } catch (error) {
       console.error("Failed to load node colors from schema:", error);
     } finally {
@@ -401,8 +420,8 @@ export default function GraphView({
 
       const getNodeRadius = (nodeId: number): number => {
         const connectionCount = connectionCounts.get(nodeId) || 0;
-        const minRadius = 15; // Increased from 10
-        const maxRadius = 45; // Increased from 25
+        const minRadius = 18; // Increased from 15 (15 * 1.2 = 18)
+        const maxRadius = 54; // Increased from 45 (45 * 1.2 = 54)
         const minConnections = 0;
         const maxConnections = Math.max(
           ...Array.from(connectionCounts.values())
@@ -597,10 +616,11 @@ export default function GraphView({
             .attr("opacity", 0.25)
             .attr("stroke-width", 1);
           
+          // Dim ALL text elements
           g.selectAll(".nodes g")
-            .selectAll(".node-name-text, .node-type-text")
+            .selectAll("text")
             .transition(t)
-            .attr("opacity", 0.3);
+            .attr("opacity", 0.2);
 
           // Dim all relationships
           g.selectAll(".links line")
@@ -631,21 +651,18 @@ export default function GraphView({
             .attr("fill", textColor);
 
           // Highlight the connected nodes
-          g.selectAll(".nodes g")
+          const connectedNodeSelector = g.selectAll(".nodes g")
             .filter(function(d: any) { 
               return d.id === sourceId || d.id === targetId;
-            })
-            .selectAll(".node-circle")
+            });
+            
+          connectedNodeSelector.selectAll(".node-circle")
             .transition(t)
             .attr("opacity", 1)
             .attr("stroke-width", 2)
             .attr("stroke", textColor);
           
-          g.selectAll(".nodes g")
-            .filter(function(d: any) { 
-              return d.id === sourceId || d.id === targetId;
-            })
-            .selectAll(".node-name-text, .node-type-text")
+          connectedNodeSelector.selectAll("text")
             .transition(t)
             .attr("opacity", 1);
         })
@@ -704,10 +721,11 @@ export default function GraphView({
             .attr("opacity", 0.25)
             .attr("stroke-width", 1);
           
+          // Dim ALL text elements
           g.selectAll(".nodes g")
-            .selectAll(".node-name-text, .node-type-text")
+            .selectAll("text")
             .transition(t)
-            .attr("opacity", 0.3);
+            .attr("opacity", 0.2);
 
           // Dim all relationships
           g.selectAll(".links line")
@@ -738,21 +756,18 @@ export default function GraphView({
             .attr("fill", textColor);
 
           // Highlight the connected nodes
-          g.selectAll(".nodes g")
+          const connectedNodeSelector = g.selectAll(".nodes g")
             .filter(function(d: any) { 
               return d.id === sourceId || d.id === targetId;
-            })
-            .selectAll(".node-circle")
+            });
+            
+          connectedNodeSelector.selectAll(".node-circle")
             .transition(t)
             .attr("opacity", 1)
             .attr("stroke-width", 2)
             .attr("stroke", textColor);
           
-          g.selectAll(".nodes g")
-            .filter(function(d: any) { 
-              return d.id === sourceId || d.id === targetId;
-            })
-            .selectAll(".node-name-text, .node-type-text")
+          connectedNodeSelector.selectAll("text")
             .transition(t)
             .attr("opacity", 1);
         })
@@ -837,31 +852,85 @@ export default function GraphView({
         .ease(d3.easeElasticOut.amplitude(0.5))
         .attr("r", (d: D3Node) => getNodeRadius(d.id));
 
+      // Create a filter for text shadow
+      const textShadowFilter = defs
+        .append("filter")
+        .attr("id", "text-shadow")
+        .attr("x", "-50%")
+        .attr("y", "-50%")
+        .attr("width", "200%")
+        .attr("height", "200%");
+      
+      // Add a stronger drop shadow for better readability against light backgrounds
+      textShadowFilter
+        .append("feDropShadow")
+        .attr("dx", 0)
+        .attr("dy", 0)
+        .attr("stdDeviation", 1.5)
+        .attr("flood-opacity", 0.5)
+        .attr("flood-color", "#000000");
+
       nodeElements
         .append("text")
         .attr("class", "node-name-text")
-        .attr("font-size", "9px")
-        .attr("font-weight", "600")
-        .attr("dy", "0.3em")
-        .attr("text-anchor", "middle")
-        .attr("fill", (d: D3Node) => {
-          const c = d3.hsl(nodeColors[d.label] || defaultColor);
-          return c && c.l > 0.55 ? "#000000" : "#FFFFFF";
+        .attr("font-size", (d: D3Node) => {
+          const radius = getNodeRadius(d.id);
+          // Scale font size based on node radius, capped for readability
+          // Reduced by 25% to fit better within the node
+          return Math.min(Math.max(radius * 0.3, 7), 10) + "px";
         })
+        .attr("font-weight", "600")
+        .attr("dy", "-0.2em")
+        .attr("text-anchor", "middle")
+        .attr("fill", "#FFFFFF") // Always use white for all node labels
         .style("pointer-events", "none")
         .style("opacity", 0)
-        .text((d: D3Node) => {
+        .style("filter", "url(#text-shadow)")
+        .each(function (d: D3Node) {
           const name = d.properties?.name || `Node ${d.id}`;
           const radius = getNodeRadius(d.id);
-          const maxLength = Math.max(3, Math.floor(radius * 0.7));
-          return name.length > maxLength
-            ? name.substring(0, maxLength - 3) + "..."
-            : name;
-        })
-        .each(function (d: D3Node) {
-          d3.select(this)
-            .append("title")
-            .text(d.properties?.name || `Node ${d.id}`);
+          const fontSize = Math.min(Math.max(radius * 0.3, 7), 10);
+          
+          // Get SVG text element
+          const textElement = d3.select(this);
+          
+          // Calculate how many characters can fit per line based on radius
+          const charsPerLine = Math.max(Math.floor(radius * 1.6 / (fontSize * 0.6)), 5);
+          
+          // Clear any existing content first
+          textElement.text("");
+          
+          // If name is short enough, just set it directly
+          if (name.length <= charsPerLine) {
+            textElement.text(name);
+          } else {
+            // Split text into two lines if needed
+            const firstLine = name.substring(0, charsPerLine);
+            let secondLine = "";
+            
+            // If name is longer than what can fit in two lines, truncate with ellipsis
+            if (name.length > charsPerLine * 2) {
+              secondLine = name.substring(charsPerLine, charsPerLine * 2 - 3) + "...";
+            } else {
+              secondLine = name.substring(charsPerLine);
+            }
+            
+            // Add first line
+            textElement.append("tspan")
+                      .attr("x", 0)
+                      .attr("dy", "-0.6em")
+                      .text(firstLine);
+            
+            // Add second line
+            textElement.append("tspan")
+                      .attr("x", 0)
+                      .attr("dy", "1.2em")
+                      .text(secondLine);
+          }
+          
+          // Add title for tooltip
+          textElement.append("title")
+                    .text(name);
         })
         .transition()
         .delay(600)
@@ -873,12 +942,13 @@ export default function GraphView({
         .attr("class", "node-type-text")
         .attr("font-size", "8px")
         .attr("font-style", "italic")
-        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 14)
+        .attr("dy", (d: D3Node) => getNodeRadius(d.id) + 14) // Position it back outside the node
         .attr("text-anchor", "middle")
-        .attr("fill", d3MutedForegroundColor)
+        .attr("fill", d3MutedForegroundColor) // Revert to original color
         .style("pointer-events", "none")
         .style("opacity", 0)
-        .text((d: D3Node) => d.label || "Unknown")
+        .style("filter", "url(#text-shadow)")
+        .text((d: D3Node) => d.label || "Unknown") // Revert to original display
         .transition()
         .delay(700)
         .duration(800)
@@ -912,69 +982,76 @@ export default function GraphView({
         }
 
         const t = d3.transition().duration(300);
-
         const { textColor } = getThemeColors();
 
-        nodeElements
+        // First, dim ALL node elements
+        g.selectAll(".nodes g")
           .selectAll(".node-circle")
           .transition(t)
           .attr("opacity", 0.25)
           .attr("stroke-width", 1);
-        nodeElements
-          .selectAll(".node-name-text, .node-type-text")
+          
+        // Forcefully dim ALL text elements by selecting them directly
+        g.selectAll(".nodes g")
+          .selectAll("text")
           .transition(t)
-          .attr("opacity", 0.3);
-        linkElements
-          .selectAll("line")
+          .attr("opacity", 0.2);
+        
+        // Dim all relationships
+        g.selectAll(".links line")
           .transition(t)
           .attr("stroke-opacity", 0.15)
           .attr("stroke-width", 1);
-        linkElements.selectAll("text").transition(t).attr("opacity", 0.15);
+        
+        g.selectAll(".links text")
+          .transition(t)
+          .attr("opacity", 0.15);
 
+        // Then highlight the selected node
         const selectedSvgNode = d3.select(event.currentTarget as Element);
-        selectedSvgNode
-          .select(".node-circle")
+        selectedSvgNode.select(".node-circle")
           .transition(t)
           .attr("opacity", 1)
           .attr("stroke-width", 2.5)
           .attr("stroke", textColor);
-        selectedSvgNode
-          .selectAll(".node-name-text, .node-type-text")
+        
+        // Make ALL text elements for selected node visible
+        selectedSvgNode.selectAll("text")
           .transition(t)
           .attr("opacity", 1);
 
-        nodeElements
-          .filter((n: D3Node) => newlyConnected.includes(n.id))
-          .selectAll(".node-circle")
+        // Highlight connected nodes
+        const connectedNodes = g.selectAll(".nodes g")
+          .filter(function(n: any) { 
+            return newlyConnected.includes(n.id);
+          });
+        
+        connectedNodes.selectAll(".node-circle")
           .transition(t)
           .attr("opacity", 0.9)
           .attr("stroke-width", 2);
-        nodeElements
-          .filter((n: D3Node) => newlyConnected.includes(n.id))
-          .selectAll(".node-name-text, .node-type-text")
+        
+        // Make ALL text elements for connected nodes partially visible
+        connectedNodes.selectAll("text")
           .transition(t)
-          .attr("opacity", 0.9);
+          .attr("opacity", 0.8);
 
-        linkElements
-          .filter(
-            (l: D3Link) =>
-              (typeof l.source === "object" ? l.source.id : l.source) ===
-                d.id ||
-              (typeof l.target === "object" ? l.target.id : l.target) === d.id
-          )
-          .selectAll("line")
+        // Highlight related relationships
+        const relatedLinks = g.selectAll(".links g").filter(
+          function(l: any) {
+            const sourceId = typeof l.source === "object" ? l.source.id : l.source;
+            const targetId = typeof l.target === "object" ? l.target.id : l.target;
+            return sourceId === d.id || targetId === d.id;
+          }
+        );
+        
+        relatedLinks.selectAll("line")
           .transition(t)
           .attr("stroke-opacity", 0.8)
           .attr("stroke-width", 2)
           .attr("stroke", textColor);
-        linkElements
-          .filter(
-            (l: D3Link) =>
-              (typeof l.source === "object" ? l.source.id : l.source) ===
-                d.id ||
-              (typeof l.target === "object" ? l.target.id : l.target) === d.id
-          )
-          .selectAll("text")
+        
+        relatedLinks.selectAll("text")
           .transition(t)
           .attr("opacity", 1)
           .attr("font-weight", "bold")
@@ -1012,7 +1089,12 @@ export default function GraphView({
           )
           .attr("stroke-width", 1.5);
         nodeElements
-          .selectAll(".node-name-text, .node-type-text")
+          .selectAll(".node-name-text")
+          .transition(t)
+          .attr("opacity", 1)
+          .attr("fill", "#FFFFFF");
+        nodeElements
+          .selectAll(".node-type-text")
           .transition(t)
           .attr("opacity", 1);
         d3.select(svgRef.current)
@@ -1042,6 +1124,113 @@ export default function GraphView({
     };
   }, [data, theme, resolvedTheme, initialized, nodeColors]);
 
+  // Create a separate useEffect for the SVG click handler that avoids blinking
+  useEffect(() => {
+    // Skip if not initialized yet or no SVG reference
+    if (!initialized || !svgRef.current) return;
+
+    // Create a one-time flag to track if this is the first click
+    let isFirstClick = true;
+
+    // Get the SVG element
+    const svg = d3.select(svgRef.current);
+    
+    // Remove any existing click handlers first
+    svg.on("click", null);
+    
+    // Add our new handler
+    svg.on("click", () => {
+      // If first click and no selection, don't apply visual changes
+      if (isFirstClick && !selectedNode && !selectedRelationship) {
+        isFirstClick = false;
+        
+        // Just update state without visual changes
+        setSelectedNode(null);
+        setSelectedRelationship(null);
+        setConnectedNodes([]);
+        setShowCategorized(false);
+        setIsEditing(false);
+        setIsEditingRelationship(false);
+
+        if (onNodeSelected) {
+          onNodeSelected(null);
+        }
+        
+        return;
+      }
+      
+      // Not first click, proceed as normal
+      setSelectedNode(null);
+      setSelectedRelationship(null);
+      setConnectedNodes([]);
+      setShowCategorized(false);
+      setIsEditing(false);
+      setIsEditingRelationship(false);
+
+      if (onNodeSelected) {
+        onNodeSelected(null);
+      }
+
+      const t = d3.transition().duration(300);
+      
+      // Get theme colors directly to avoid reference issues
+      const isDarkTheme =
+        resolvedTheme === "dark" ||
+        document.documentElement.classList.contains("dark") ||
+        document.documentElement.getAttribute("data-theme") === "dark";
+
+      const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
+      const linkColor = isDarkTheme ? "#606060" : "#C0C0C0";
+      const borderColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--border")
+        .trim();
+
+      // Apply visual changes
+      svg.selectAll(".nodes g")
+        .selectAll(".node-circle")
+        .transition(t)
+        .attr("opacity", 1)
+        .attr(
+          "stroke",
+          (n: any) =>
+            d3
+              .color(nodeColors[n.label] || defaultColor)
+              ?.darker(0.7)
+              .toString() || `hsl(${borderColor})`
+        )
+        .attr("stroke-width", 1.5);
+
+      svg.selectAll(".nodes g")
+        .selectAll(".node-name-text")
+        .transition(t)
+        .attr("opacity", 1)
+        .attr("fill", "#FFFFFF");
+
+      svg.selectAll(".nodes g")
+        .selectAll(".node-type-text")
+        .transition(t)
+        .attr("opacity", 1);
+
+      svg.selectAll(".links line")
+        .transition(t)
+        .attr("stroke", linkColor)
+        .attr("stroke-opacity", 0.5)
+        .attr("stroke-width", 1.5);
+
+      svg.selectAll(".links text")
+        .transition(t)
+        .attr("fill", textColor)
+        .attr("opacity", 0.7)
+        .attr("font-weight", "normal");
+    });
+    
+    // Cleanup handler when component unmounts or re-initializes
+    return () => {
+      svg.on("click", null);
+    };
+  }, [initialized, nodeColors, onNodeSelected, selectedNode, selectedRelationship, resolvedTheme]);
+
+  // First, let's fix the updateThemeColors function to avoid unnecessary repaints
   useEffect(() => {
     if (!initialized || !svgRef.current) return;
 
@@ -1050,18 +1239,26 @@ export default function GraphView({
 
       const svg = d3.select(svgRef.current!);
 
-      svg.selectAll(".links text").attr("fill", textColor);
+      // Instead of immediately updating colors, check if we need to update
+      const currentNodeNameColor = svg.select(".node-name-text").attr("fill");
+      const currentLinkTextColor = svg.select(".links text").attr("fill");
+      
+      // Only update if colors are actually different or undefined
+      if (!currentLinkTextColor || currentLinkTextColor !== textColor) {
+        svg.selectAll(".links text").attr("fill", textColor);
+      }
 
-      svg.selectAll(".node-name-text").attr("fill", textColor);
+      // For node name text, we'll always keep it white regardless of theme
+      svg.selectAll(".node-name-text").attr("fill", "#FFFFFF");
 
+      // Type text and other elements should update with theme
       svg.selectAll(".node-type-text").attr("fill", mutedForegroundColor);
-
       svg.select("#arrow path").attr("fill", textColor);
-
       svg.selectAll(".links line").attr("stroke", linkColor);
     };
 
-    requestAnimationFrame(updateThemeColors);
+    // Use a timeout instead of requestAnimationFrame to reduce the chance of flickering
+    const updateTimeout = setTimeout(updateThemeColors, 50);
 
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
@@ -1070,7 +1267,9 @@ export default function GraphView({
           (mutation.attributeName === "class" ||
             mutation.attributeName === "data-theme")
         ) {
-          requestAnimationFrame(updateThemeColors);
+          // Again, use timeout instead of requestAnimationFrame
+          const themeChangeTimeout = setTimeout(updateThemeColors, 50);
+          return () => clearTimeout(themeChangeTimeout);
         }
       });
     });
@@ -1082,6 +1281,7 @@ export default function GraphView({
 
     return () => {
       observer.disconnect();
+      clearTimeout(updateTimeout);
     };
   }, [theme, resolvedTheme, initialized]);
 
@@ -1222,6 +1422,149 @@ export default function GraphView({
       onNodeSelected(null);
     }
   };
+
+  // Update the search highlighting function
+  useEffect(() => {
+    // Exit early if nothing to do
+    if (!searchHighlight || !initialized || !svgRef.current || !data.nodes.length) {
+      return;
+    }
+
+    // Skip if node or relationship is selected
+    if (selectedNode || selectedRelationship) {
+      return;
+    }
+
+    const svgEl = svgRef.current;
+    const searchTerm = searchHighlight.toLowerCase();
+
+    // Find matching node IDs
+    const matchingNodeIds = new Set<number>();
+
+    data.nodes.forEach(node => {
+      const nodeName = String(node.properties?.name || '').toLowerCase();
+      if (nodeName.includes(searchTerm)) {
+        const nodeId = typeof node.id === "object" && node.id !== null 
+          ? node.id.low 
+          : Number(node.id);
+        matchingNodeIds.add(nodeId);
+      }
+    });
+
+    // If no matching nodes, exit early
+    if (matchingNodeIds.size === 0) {
+      return;
+    }
+
+    // Small delay to ensure D3 has finished rendering
+    setTimeout(() => {
+      try {
+        const { textColor } = getThemeColors();
+        
+        // Use D3 to select elements for better control
+        const svg = d3.select(svgEl);
+        
+        // First, dim all nodes
+        svg.selectAll('.nodes g .node-circle')
+          .attr('opacity', 0.25)
+          .attr('stroke-width', 1);
+        
+        // Dim ALL text elements using a direct selection
+        svg.selectAll('.nodes g .node-name-text')
+          .attr('opacity', 0.2)
+          .attr('fill', '#FFFFFF'); // Keep white color for all node names
+        
+        svg.selectAll('.nodes g .node-type-text')
+          .attr('opacity', 0.2);
+        
+        // Dim relationships
+        svg.selectAll('.links line')
+          .attr('stroke-opacity', 0.15)
+          .attr('stroke-width', 1);
+        
+        svg.selectAll('.links text')
+          .attr('opacity', 0.15);
+        
+        // Highlight matching nodes
+        svg.selectAll('.nodes g')
+          .filter(function() {
+            const nodeId = Number(d3.select(this).attr('data-id'));
+            return matchingNodeIds.has(nodeId);
+          })
+          .each(function() {
+            const node = d3.select(this);
+            
+            // Highlight the circle
+            node.select('.node-circle')
+              .attr('opacity', 1)
+              .attr('stroke-width', 2.5)
+              .attr('stroke', textColor);
+            
+            // Highlight name text (keeping white color)
+            node.select('.node-name-text')
+              .attr('opacity', 1)
+              .attr('fill', '#FFFFFF');
+            
+            // Highlight type text
+            node.select('.node-type-text')
+              .attr('opacity', 1);
+          });
+        
+      } catch (error) {
+        console.error("Error applying search highlighting:", error);
+      }
+    }, 100);
+
+    // Clean up function to restore normal appearance
+    return () => {
+      if (!svgEl || selectedNode || selectedRelationship) return;
+      
+      setTimeout(() => {
+        try {
+          const { textColor, linkColor } = getThemeColors();
+          const svg = d3.select(svgEl);
+          
+          // Restore node appearance
+          svg.selectAll('.nodes g').each(function() {
+            const node = d3.select(this);
+            const label = node.attr('data-label') || '';
+            
+            // Restore circle
+            node.select('.node-circle')
+              .attr('opacity', 1)
+              .attr('stroke-width', 1.5);
+            
+            // Restore original stroke color
+            const strokeColor = d3.color(nodeColors[label] || defaultColor)?.darker(0.7).toString() || 
+                              getComputedStyle(document.documentElement).getPropertyValue("--border").trim();
+            node.select('.node-circle').attr('stroke', strokeColor);
+            
+            // Restore name text with white color
+            node.select('.node-name-text')
+              .attr('opacity', 1)
+              .attr('fill', '#FFFFFF');
+            
+            // Restore type text
+            node.select('.node-type-text')
+              .attr('opacity', 1);
+          });
+          
+          // Restore relationship appearance
+          svg.selectAll('.links line')
+            .attr('stroke-opacity', 0.5)
+            .attr('stroke-width', 1.5)
+            .attr('stroke', linkColor);
+            
+          svg.selectAll('.links text')
+            .attr('opacity', 0.7)
+            .attr('font-weight', 'normal')
+            .attr('fill', textColor);
+        } catch (error) {
+          console.error("Error resetting search highlighting:", error);
+        }
+      }, 100);
+    };
+  }, [searchHighlight, initialized, data.nodes, selectedNode, selectedRelationship, nodeColors]);
 
   return (
     <div className="flex flex-col h-full w-full relative isolate">
