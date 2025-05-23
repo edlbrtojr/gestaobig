@@ -55,3 +55,43 @@ export async function PUT(
     await session.close();
   }
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  const session = driver.session();
+
+  try {
+    const nodeId = parseInt(params.id);
+
+    // Delete the node
+    const result = await session.run(
+      `
+      MATCH (n)
+      WHERE ID(n) = $nodeId
+      DETACH DELETE n
+      RETURN count(n) as deletedCount
+      `,
+      {
+        nodeId: nodeId,
+      }
+    );
+
+    const deletedCount = result.records[0]?.get("deletedCount");
+
+    if (!deletedCount || deletedCount.low === 0) {
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, message: "Node deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting node:", error);
+    return NextResponse.json(
+      { error: "Failed to delete node" },
+      { status: 500 }
+    );
+  } finally {
+    await session.close();
+  }
+}

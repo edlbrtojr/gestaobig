@@ -1,100 +1,72 @@
 "use client";
 
 import * as React from "react";
-import { Moon, Sun, Monitor } from "lucide-react";
-import { useTheme } from "./theme-provider";
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
+import { useOrganizationConfig } from "@/components/org-config-provider";
 
 export default function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const { config } = useOrganizationConfig();
   const [mounted, setMounted] = React.useState(false);
-  const [isTransitioning, setIsTransitioning] = React.useState(false);
 
   // Avoid hydration mismatch
   React.useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Cycle through themes: light -> dark -> system -> light
-  const cycleTheme = () => {
-    // Prevent rapid theme changes during transition
-    if (isTransitioning) return;
+  // Toggle between light and dark only
+  const toggleTheme = React.useCallback(() => {
+    setTheme(theme === "light" ? "dark" : "light");
+  }, [theme, setTheme]);
 
-    setIsTransitioning(true);
+  // Memoized icon based on current theme
+  const ThemeIcon = React.useMemo(() => {
+    return theme === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />;
+  }, [theme]);
 
-    if (theme === "light") {
-      setTheme("dark");
-    } else if (theme === "dark") {
-      setTheme("system");
-    } else {
-      setTheme("light");
-    }
+  // Memoized aria label
+  const ariaLabel = React.useMemo(() => {
+    return theme === "light" ? "Switch to dark theme" : "Switch to light theme";
+  }, [theme]);
 
-    // Allow theme changes again after transition completes
-    setTimeout(() => {
-      setIsTransitioning(false);
-    }, 350); // Matches transition duration
-  };
+  // Memoized animation key
+  const animationKey = React.useMemo(() => {
+    return theme === "dark" ? "dark-icon" : "light-icon";
+  }, [theme]);
 
-  // Get the icon based on current theme
-  const getThemeIcon = () => {
-    if (theme === "system") {
-      return <Monitor className="h-3.5 w-3.5" />;
-    } else if (theme === "dark") {
-      return <Moon className="h-3.5 w-3.5" />;
-    } else {
-      return <Sun className="h-3.5 w-3.5" />;
-    }
-  };
-
-  // Get the aria label based on the next theme in cycle
-  const getAriaLabel = () => {
-    if (theme === "light") return "Switch to dark theme";
-    if (theme === "dark") return "Switch to system theme";
-    return "Switch to light theme";
-  };
-
-  // Get the animation key to ensure proper animation transitions
-  const getAnimationKey = () => {
-    if (theme === "system") return "system-icon";
-    if (theme === "dark") return "dark-icon";
-    return "light-icon";
-  };
-
-  if (!mounted) {
-    return <div className="w-7 h-7" aria-hidden="true" />;
+  // Don't show toggle if system preference is not enabled
+  if (!mounted || (config && !config.theme.enableSystem)) {
+    return null;
   }
+
+  // Determine current theme, defaulting to light if undefined
+  const actualTheme = theme || "light";
+  const currentTheme = actualTheme === "system" ? (resolvedTheme || "light") : actualTheme;
+  const themeDisplayName = currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1);
 
   return (
     <Button
       variant="ghost"
       size="sm"
-      className={`relative rounded-full w-7 h-7 flex items-center justify-center overflow-hidden p-0 ${
-        isTransitioning ? "pointer-events-none" : ""
-      }`}
-      onClick={cycleTheme}
-      aria-label={getAriaLabel()}
+      className="relative rounded-full w-7 h-7 flex items-center justify-center overflow-hidden p-0"
+      onClick={toggleTheme}
+      aria-label={ariaLabel}
       data-theme-toggle-button
-      data-current-theme={theme}
-      data-resolved-theme={resolvedTheme}
-      title={`Current: ${theme.charAt(0).toUpperCase() + theme.slice(1)} theme${
-        theme === "system"
-          ? ` (${
-              resolvedTheme.charAt(0).toUpperCase() + resolvedTheme.slice(1)
-            })`
-          : ""
-      }`}
+      data-current-theme={currentTheme}
+      title={`Current: ${themeDisplayName} theme`}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
-          key={getAnimationKey()}
+          key={animationKey}
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 20, opacity: 0 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
+          transition={{ duration: 0.15, ease: "easeInOut" }}
         >
-          {getThemeIcon()}
+          {ThemeIcon}
         </motion.div>
       </AnimatePresence>
       <span className="sr-only">Toggle theme</span>

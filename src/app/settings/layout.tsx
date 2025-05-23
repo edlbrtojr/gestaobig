@@ -30,17 +30,14 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
             <SideNavItem href="/settings" exact>
               Geral
             </SideNavItem>
-            <SideNavItem href="/settings/appearance">
-              Aparência
+            <SideNavItem href="/settings/organization">
+              Organização
             </SideNavItem>
             <SideNavItem href="/settings/aplicativo">
               Aplicativo
             </SideNavItem>
             <SideNavItem href="/settings/database">
               Banco de Dados
-            </SideNavItem>
-            <SideNavItem href="/settings/api">
-              API
             </SideNavItem>
             <SideNavItem href="/settings/admin">
               Admin

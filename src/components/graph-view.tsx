@@ -84,10 +84,40 @@ const setupSchemaPolling = (callback: () => void) => {
     }
   };
   
-  // Check every 5 minutes instead of 30 seconds to reduce refresh frequency
+  // Instead of polling frequently, check only once every 5 minutes
+  // This should drastically reduce the number of API calls
   const interval = setInterval(pollSchema, 300000);
   
+  // Don't call pollSchema immediately on component mount
+  // The initial load will be handled by the loadNodeColors call later
+  
   return () => clearInterval(interval);
+};
+
+// Define group centers for semantic clustering
+// Each label type will have its own orbital radius and angle
+const calculateGroupCenters = (width: number, height: number, labels: string[]): Record<string, {x: number, y: number, r: number}> => {
+  const centers: Record<string, {x: number, y: number, r: number}> = {};
+  const centerX = width / 2;
+  const centerY = height / 2;
+  
+  // Base distance from center for the group orbits
+  const baseRadius = Math.min(width, height) * 0.25;
+  
+  // Distribute the labels evenly in a circle
+  labels.forEach((label, i) => {
+    // Calculate angle based on position in array
+    const angle = (i / labels.length) * 2 * Math.PI;
+    // Calculate position using polar coordinates
+    const x = centerX + baseRadius * Math.cos(angle);
+    const y = centerY + baseRadius * Math.sin(angle);
+    // Different radius for each group's internal clustering
+    const r = baseRadius * 0.4;
+    
+    centers[label] = { x, y, r };
+  });
+  
+  return centers;
 };
 
 // Interface for categorized nodes
@@ -115,6 +145,13 @@ const formatValue = (value: any): string => {
   return String(value);
 };
 
+// Helper function to safely extract node IDs from Neo4j objects
+const safeExtractNodeId = (id: any): number => {
+  if (id === null || id === undefined) return -1;
+  if (typeof id === "object" && id !== null && "low" in id) return id.low;
+  return Number(id);
+};
+
 export default function GraphView({ 
   data, 
   onNodeSelected,
@@ -125,6 +162,8 @@ export default function GraphView({
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
   const [selectedRelationship, setSelectedRelationship] = useState<D3Link | null>(null);
+  const selectedNodeRef = useRef<D3Node | null>(null);
+  const selectedRelationshipRef = useRef<D3Link | null>(null);
   const [connectedNodes, setConnectedNodes] = useState<number[]>([]);
   const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>({});
   const [showCategorized, setShowCategorized] = useState(false);
@@ -139,11 +178,25 @@ export default function GraphView({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [nodeColors, setNodeColors] = useState<Record<string, string>>(defaultNodeColors);
   const [isLoadingColors, setIsLoadingColors] = useState(true);
+  // Track view mode: 'standard', 'search', or 'selection'
+  const [viewMode, setViewMode] = useState<'standard' | 'search' | 'selection'>('standard');
+  // Store search matching node IDs
+  const matchingNodeIdsRef = useRef<Set<number>>(new Set());
+  // Add new state for hierarchical levels
+  const [hierarchyLevels, setHierarchyLevels] = useState<Record<number, number>>({});
+  // Add state for fisheye distortion center
+  const [distortionCenter, setDistortionCenter] = useState<{x: number, y: number} | null>(null);
+  const [enableFisheye, setEnableFisheye] = useState(false);
+  const [groupCentersMap, setGroupCentersMap] = useState<Record<string, {x: number, y: number, r: number}>>({});
 
   // Load node colors from schema
   const loadNodeColors = async () => {
+    // Skip if already loading
+    if (isLoadingColors) return;
+    
     try {
       setIsLoadingColors(true);
+      
       const schema = await getGraphSchema();
       const newColors: Record<string, string> = { ...defaultNodeColors };
       
@@ -156,11 +209,11 @@ export default function GraphView({
         }
       });
       
-      // Check if colors actually changed before updating state
+      // Deep comparison to check if colors actually changed
       let colorsChanged = false;
       
-      // Only check keys that exist in either object
-      const allKeys = new Set([...Object.keys(nodeColors), ...Object.keys(newColors)]);
+      // Use stable algorithm for comparison
+      const allKeys = Array.from(new Set([...Object.keys(nodeColors), ...Object.keys(newColors)]));
       
       for (const key of allKeys) {
         if (nodeColors[key] !== newColors[key]) {
@@ -169,7 +222,9 @@ export default function GraphView({
         }
       }
       
+      // Only update state if colors actually changed to prevent rerenders
       if (colorsChanged) {
+        console.log("Node colors changed, updating state");
         setNodeColors(newColors);
         // Only force re-initialization if colors actually changed
         setInitialized(false);
@@ -183,27 +238,36 @@ export default function GraphView({
 
   // Add an effect to update node colors when schema changes
   useEffect(() => {
+    // Prevent multiple calls when data hasn't changed
+    if (isLoadingColors) return;
+    
+    // Initialize loading flag
+    let isMounted = true;
+    
     // Handler for custom event
     const handleSchemaUpdated = () => {
-      loadNodeColors();
+      if (isMounted) loadNodeColors();
     };
     
     // Listen for direct schema update events
     window.addEventListener('schemaUpdated', handleSchemaUpdated);
     
-    // Set up polling for schema changes 
+    // Set up polling for schema changes - but only call loadNodeColors once at initialization
     const cleanupPolling = setupSchemaPolling(() => {
-      loadNodeColors();
+      if (isMounted) loadNodeColors();
     });
     
-    // Initial load of colors
-    loadNodeColors();
+    // Initial load of colors - only if we haven't loaded them yet
+    if (!Object.keys(nodeColors).length || Object.keys(nodeColors).length === Object.keys(defaultNodeColors).length) {
+      loadNodeColors();
+    }
     
     return () => {
+      isMounted = false;
       window.removeEventListener('schemaUpdated', handleSchemaUpdated);
       cleanupPolling();
     };
-  }, []);
+  }, []);  // Empty dependency array to ensure this only runs once on mount
 
   // Use memo for expensive graph data processing
   const [processedData, nodeMap] = useMemo(() => {
@@ -309,6 +373,122 @@ export default function GraphView({
     }
   }, [data]);
 
+  // New effect to calculate hierarchy levels based on relationships
+  useEffect(() => {
+    if (!data.nodes.length || !data.relationships.length) return;
+    
+    // Start by finding potential root nodes (nodes with outgoing but no incoming relationships)
+    const incomingEdges: Record<number, number> = {};
+    const outgoingEdges: Record<number, number> = {};
+    
+    // Count incoming and outgoing edges for each node
+    data.relationships.forEach(rel => {
+      const sourceId = safeExtractNodeId(rel.source);
+      const targetId = safeExtractNodeId(rel.target);
+      
+      incomingEdges[targetId] = (incomingEdges[targetId] || 0) + 1;
+      outgoingEdges[sourceId] = (outgoingEdges[sourceId] || 0) + 1;
+    });
+    
+    // Identify root nodes (nodes with outgoing edges but no incoming edges)
+    const rootNodeIds = data.nodes
+      .filter(node => {
+        const nodeId = safeExtractNodeId(node.id);
+        return outgoingEdges[nodeId] && !incomingEdges[nodeId];
+      })
+      .map(node => safeExtractNodeId(node.id));
+    
+    // If no clear root nodes, use nodes with more outgoing than incoming edges
+    if (rootNodeIds.length === 0) {
+      rootNodeIds.push(...data.nodes
+        .filter(node => {
+          const nodeId = safeExtractNodeId(node.id);
+          return (outgoingEdges[nodeId] || 0) > (incomingEdges[nodeId] || 0);
+        })
+        .map(node => safeExtractNodeId(node.id))
+      );
+    }
+    
+    // Still no roots? Use any node with the most connections
+    if (rootNodeIds.length === 0 && data.nodes.length > 0) {
+      const nodeWithMostConnections = data.nodes.reduce((max, node) => {
+        const nodeId = safeExtractNodeId(node.id);
+        const connections = (outgoingEdges[nodeId] || 0) + (incomingEdges[nodeId] || 0);
+        return connections > max.connections ? { id: nodeId, connections } : max;
+      }, { id: -1, connections: -1 });
+      
+      if (nodeWithMostConnections.id !== -1) {
+        rootNodeIds.push(nodeWithMostConnections.id);
+      }
+    }
+    
+    // Build adjacency list for the graph
+    const adjList: Record<number, number[]> = {};
+    data.relationships.forEach(rel => {
+      const sourceId = safeExtractNodeId(rel.source);
+      const targetId = safeExtractNodeId(rel.target);
+      
+      if (!adjList[sourceId]) adjList[sourceId] = [];
+      if (!adjList[targetId]) adjList[targetId] = [];
+      
+      adjList[sourceId].push(targetId);
+    });
+    
+    // Assign hierarchy levels using BFS from root nodes
+    const newHierarchyLevels: Record<number, number> = {};
+    const visited = new Set<number>();
+    
+    // Queue for BFS with [nodeId, level]
+    const queue: [number, number][] = rootNodeIds.map(id => [id, 0]);
+    
+    while (queue.length > 0) {
+      const [nodeId, level] = queue.shift()!;
+      
+      if (visited.has(nodeId)) {
+        // If we've seen this node before, keep the minimum level
+        newHierarchyLevels[nodeId] = Math.min(level, newHierarchyLevels[nodeId] || Infinity);
+        continue;
+      }
+      
+      visited.add(nodeId);
+      newHierarchyLevels[nodeId] = level;
+      
+      // Add neighbors to the queue
+      const neighbors = adjList[nodeId] || [];
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          queue.push([neighbor, level + 1]);
+        }
+      }
+    }
+    
+    // For any unvisited nodes, assign a middle level
+    const maxLevel = Math.max(...Object.values(newHierarchyLevels), 0);
+    const defaultLevel = Math.ceil(maxLevel / 2);
+    
+    data.nodes.forEach(node => {
+      const nodeId = safeExtractNodeId(node.id);
+      if (!visited.has(nodeId)) {
+        newHierarchyLevels[nodeId] = defaultLevel;
+      }
+    });
+    
+    setHierarchyLevels(newHierarchyLevels);
+    
+    // Get all unique node labels for group centers
+    const uniqueLabels = Array.from(new Set(data.nodes.map(node => node.label)));
+    
+    // Calculate group centers
+    if (svgRef.current) {
+      const containerWidth = svgRef.current.parentElement?.clientWidth || window.innerWidth;
+      const containerHeight = svgRef.current.parentElement?.clientHeight || window.innerHeight;
+      const centers = calculateGroupCenters(containerWidth, containerHeight, uniqueLabels);
+      setGroupCentersMap(centers);
+    }
+    
+  }, [data.nodes, data.relationships]);
+
+  // Main graph initialization effect that should not depend on node selection
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) {
       if (simulationRef.current) {
@@ -482,14 +662,32 @@ export default function GraphView({
 
       const g = containerGroup.append("g");
 
+      // Enhanced zoom with fisheye effect support
       const zoom = d3
         .zoom()
         .scaleExtent([0.1, 8])
         .on("zoom", (event) => {
           g.attr("transform", event.transform);
+          
+          // Update distortion center for fisheye effect when zooming
+          if (enableFisheye && distortionCenter) {
+            // Convert mouse coordinates to simulation space
+            const transform = d3.zoomTransform(svg.node() as Element);
+            const x = (distortionCenter.x - transform.x) / transform.k;
+            const y = (distortionCenter.y - transform.y) / transform.k;
+            setDistortionCenter({ x, y });
+          }
         });
 
       svg.call(zoom as any);
+      
+      // Mouse move handler for fisheye distortion
+      svg.on("mousemove", (event) => {
+        if (enableFisheye) {
+          const [x, y] = d3.pointer(event);
+          setDistortionCenter({ x, y });
+        }
+      });
 
       // Double-click to zoom reset
       svg.on("dblclick.zoom", null);
@@ -500,7 +698,214 @@ export default function GraphView({
           .call(zoom.transform as any, d3.zoomIdentity);
       });
 
-      // Configure the simulation with gentler forces
+      // Direct click handler on SVG for better event capturing
+      svg.on("click", (event) => {
+        // Prevent click handler from firing when clicking on a node or relationship
+        if (event.defaultPrevented) return;
+        
+        console.log("SVG click, current mode:", viewMode);
+        
+        // Two-stage clearing behavior
+        if (viewMode === 'selection') {
+          console.log("Selection mode, returning to search mode");
+          // If we're in selection mode, go back to search mode if we have search results
+          if (searchHighlight && matchingNodeIdsRef.current.size > 0) {
+            // Clear node selection
+            setSelectedNode(null);
+            selectedNodeRef.current = null;
+            setSelectedRelationship(null);
+            selectedRelationshipRef.current = null;
+            setConnectedNodes([]);
+            setShowCategorized(false);
+            setIsEditing(false);
+            setIsEditingRelationship(false);
+            
+            // Change to search mode
+            setViewMode('search');
+            
+            if (onNodeSelected) {
+              onNodeSelected(null);
+            }
+            
+            // Apply search highlighting
+            const t = d3.transition().duration(300);
+            
+            // Get theme colors directly to avoid dependency issues
+            const isDarkTheme =
+              resolvedTheme === "dark" ||
+              document.documentElement.classList.contains("dark") ||
+              document.documentElement.getAttribute("data-theme") === "dark";
+            
+            const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
+            
+            // First dim all nodes
+            svg.selectAll('.nodes g .node-circle')
+              .transition(t)
+              .attr('opacity', 0.15)
+              .style('opacity', 0.15)
+              .attr('stroke-width', 1);
+            
+            // Dim all text elements
+            svg.selectAll('.nodes g .node-name-text')
+              .transition(t)
+              .attr('opacity', 0.08)
+              .style('opacity', 0.08)
+              .attr('fill', '#FFFFFF');
+            
+            svg.selectAll('.nodes g .node-type-text')
+              .transition(t)
+              .attr('opacity', 0.08)
+              .style('opacity', 0.08);
+            
+            // Dim relationships
+            svg.selectAll('.links line')
+              .transition(t)
+              .attr('stroke-opacity', 0.15)
+              .style('stroke-opacity', 0.15)
+              .attr('stroke-width', 1);
+            
+            svg.selectAll('.links text')
+              .transition(t)
+              .attr('opacity', 0.1)
+              .style('opacity', 0.1);
+            
+            // Highlight matching nodes again
+            svg.selectAll('.nodes g')
+              .filter(function() {
+                const nodeId = Number(d3.select(this).attr('data-id'));
+                return matchingNodeIdsRef.current.has(nodeId);
+              })
+              .each(function() {
+                const node = d3.select(this);
+                
+                // Highlight the circle
+                node.select('.node-circle')
+                  .transition(t)
+                  .attr('opacity', 1)
+                  .style('opacity', 1)
+                  .attr('stroke-width', 2.5)
+                  .attr('stroke', textColor);
+                
+                // Highlight name text with better forced visibility
+                node.select('.node-name-text')
+                  .transition(t)
+                  .attr('opacity', 1)
+                  .style('opacity', 1)
+                  .attr('fill', '#FFFFFF');
+                
+                // Highlight type text
+                node.select('.node-type-text')
+                  .transition(t)
+                  .attr('opacity', 1)
+                  .style('opacity', 1);
+              });
+              
+            event.stopPropagation();
+            return; // Exit early after restoring search results
+          }
+        } else if (viewMode === 'search') {
+          console.log("Search mode, clearing search");
+          // If we're in search mode, clear search and go to standard mode
+          setViewMode('standard');
+          // Clear the search term by dispatching a custom event that the parent can listen for
+          window.dispatchEvent(new CustomEvent('clearSearchTerm', {}));
+          // Also ensure the search results counter is removed
+          window.dispatchEvent(new CustomEvent('searchResultsCount', { 
+            detail: { count: 0, term: '' } 
+          }));
+          
+          event.stopPropagation();
+        }
+        
+        // Standard behavior - clear all selections and restore standard view
+        console.log("Standard mode, clearing all selections");
+        setSelectedNode(null);
+        selectedNodeRef.current = null;
+        setSelectedRelationship(null);
+        selectedRelationshipRef.current = null;
+        setConnectedNodes([]);
+        setShowCategorized(false);
+        setIsEditing(false);
+        setIsEditingRelationship(false);
+        setViewMode('standard');
+
+        if (onNodeSelected) {
+          onNodeSelected(null);
+        }
+
+        const t = d3.transition().duration(300);
+        
+        // Get theme colors directly to avoid reference issues
+        const isDarkTheme =
+          resolvedTheme === "dark" ||
+          document.documentElement.classList.contains("dark") ||
+          document.documentElement.getAttribute("data-theme") === "dark";
+
+        const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
+        const linkColor = isDarkTheme ? "#606060" : "#C0C0C0";
+        const borderColor = getComputedStyle(document.documentElement)
+          .getPropertyValue("--border")
+          .trim();
+
+        // Reset node circles
+        svg.selectAll(".nodes g .node-circle")
+          .transition(t)
+          .attr("opacity", 1)
+          .style("opacity", 1)
+          .attr(
+            "stroke",
+            (n: any) =>
+              d3
+                .color(nodeColors[n.label] || defaultColor)
+                ?.darker(0.7)
+                .toString() || `hsl(${borderColor})`
+          )
+          .attr("stroke-width", 1.5);
+
+        // Reset node name text
+        svg.selectAll(".nodes g .node-name-text")
+          .transition(t)
+          .attr("opacity", 1)
+          .style("opacity", 1)
+          .attr("fill", "#FFFFFF");
+
+        // Reset node type text
+        svg.selectAll(".nodes g .node-type-text")
+          .transition(t)
+          .attr("opacity", 1)
+          .style("opacity", 1);
+
+        // Reset relationship lines
+        svg.selectAll(".links line")
+          .transition(t)
+          .attr("stroke", linkColor)
+          .attr("stroke-opacity", 0.5)
+          .style("stroke-opacity", 0.5)
+          .attr("stroke-width", 1.5);
+
+        // Reset relationship text
+        svg.selectAll(".links text")
+          .transition(t)
+          .attr("fill", textColor)
+          .attr("opacity", 0.7)
+          .style("opacity", 0.7)
+          .attr("font-weight", "normal");
+          
+        // Also ensure the search results counter is removed when clicking elsewhere
+        window.dispatchEvent(new CustomEvent('searchResultsCount', { 
+          detail: { count: 0, term: '' } 
+        }));
+      });
+
+      // Get unique labels for node group definitions
+      const uniqueLabels = Array.from(new Set(nodes.map(node => node.label)));
+      
+      // Calculate group centers for clustering if not already calculated
+      const groupCenters = Object.keys(groupCentersMap).length > 0 
+        ? groupCentersMap 
+        : calculateGroupCenters(containerWidth, containerHeight, uniqueLabels);
+      
+      // Configure the simulation with improved forces for better node positioning
       const simulation = d3
         .forceSimulation(nodes)
         .force(
@@ -508,49 +913,225 @@ export default function GraphView({
           d3
             .forceLink(validLinks)
             .id((d: any) => d.id)
-            .distance(150)
-            .strength(0.2) // Reduced strength for gentler animation
+            .distance(180) // Increased from 140 to add more space between nodes
+            .strength((d) => {
+              // Use stronger link strength for nodes with fewer connections
+              const sourceId = typeof d.source === "object" ? d.source.id : d.source;
+              const targetId = typeof d.target === "object" ? d.target.id : d.target;
+              const sourceCount = connectionCounts.get(sourceId) || 0;
+              const targetCount = connectionCounts.get(targetId) || 0;
+              // Higher strength for nodes with fewer connections
+              return 0.2 + (1.5 / (sourceCount + targetCount + 1)); // Reduced from 0.25 to allow more spacing
+            })
         )
-        .force("charge", d3.forceManyBody().strength(-500)) // Stronger repulsion for better spacing
+        .force("charge", d3.forceManyBody()
+          .strength((d) => {
+            // Adjust charge based on connections: isolated nodes have less repulsion
+            const count = connectionCounts.get((d as D3Node).id) || 0;
+            // Adjust repulsion based on node type/label for semantic clustering
+            const nodeFactor = (d as D3Node).label === 'Risco' ? 1.3 : 
+                              (d as D3Node).label === 'PlanoDeAcao' ? 0.9 : 
+                              1.0;
+            return count === 0 ? -300 * nodeFactor : -700 * nodeFactor;
+          })
+          .distanceMax(500) // Increased from 300 to 500 to extend the effective range of the charge
+        )
         .force(
           "center",
-          d3.forceCenter(containerWidth / 2, containerHeight / 2)
+          d3.forceCenter(containerWidth / 2, containerHeight / 2).strength(0.05) // Reduced centering force
         )
         .force(
           "collide",
-          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 10)
+          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 35).strength(1) // Increased from 30 to 35 spacing and strength from lower to 1
         )
-        .alpha(0.3) // Lower alpha for calmer initial animation
-        .alphaDecay(0.015); // Slower decay for smoother movement
+        // Add a weaker X and Y force for isolated nodes
+        .force("x", d3.forceX(containerWidth / 2).strength((d) => {
+          const count = connectionCounts.get((d as D3Node).id) || 0;
+          return count === 0 ? 0.01 : 0.03; // Weaker for isolated nodes
+        }))
+        // Enhanced hierarchical layout with Y force based on hierarchy levels
+        .force("y-hierarchy", d3.forceY((d: any) => {
+          const nodeId = (d as D3Node).id;
+          const level = hierarchyLevels[nodeId] || 0;
+          // Position nodes vertically based on hierarchy level
+          // Higher-level nodes (parents) at the top, children below
+          const verticalSpacing = 120; // Pixels per hierarchy level
+          return (containerHeight / 2) - (containerHeight * 0.3) + (level * verticalSpacing);
+        }).strength(0.2)) // Moderate strength to allow other forces to still influence position
+        // Add a clustering force to pull isolated nodes toward connected ones
+        .force("cluster", d3.forceRadial(
+          (d) => {
+            const count = connectionCounts.get((d as D3Node).id) || 0;
+            // Isolated nodes are placed at a medium radius around the center
+            // Connected nodes can be anywhere based on other forces
+            return count === 0 ? containerWidth * 0.3 : 0;
+          },
+          containerWidth / 2,
+          containerHeight / 2
+        ).strength((d) => {
+          const count = connectionCounts.get((d as D3Node).id) || 0;
+          return count === 0 ? 0.1 : 0; // Only apply to isolated nodes
+        }))
+        // Add semantic clustering using forceRadial for each group type
+        .force("semantic-cluster", d3.forceRadial(
+          (d: any) => {
+            // Get the orbit radius for this node's label group
+            const label = (d as D3Node).label;
+            return groupCenters[label]?.r || 0;
+          },
+          (d: any) => {
+            // Get the x-coordinate for this node's label group
+            const label = (d as D3Node).label;
+            return groupCenters[label]?.x || containerWidth / 2;
+          },
+          (d: any) => {
+            // Get the y-coordinate for this node's label group
+            const label = (d as D3Node).label;
+            return groupCenters[label]?.y || containerHeight / 2;
+          }
+        ).strength(0.15)) // Moderate strength to create visible clustering but not override other forces
+        .alpha(0.3)
+        .alphaDecay(0.005); // Slower decay (from 0.01) for smoother settling
+
+      // Apply fisheye distortion if enabled
+      const applyFisheyeDistortion = () => {
+        if (!enableFisheye || !distortionCenter) return;
+        
+        // Simple fisheye implementation
+        const distortionRadius = 200; // Radius of effect
+        const distortionFactor = 2.5; // Magnification factor
+        
+        nodes.forEach(node => {
+          if (node.fx !== null || node.fy !== null) return; // Skip fixed nodes
+          
+          // Calculate distance from distortion center
+          const dx = (node.x || 0) - distortionCenter.x;
+          const dy = (node.y || 0) - distortionCenter.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < distortionRadius) {
+            // Calculate distortion factor (decreasing with distance)
+            const factor = 1 + (distortionFactor * (1 - distance / distortionRadius));
+            
+            // Apply distortion from the center point
+            node.x = distortionCenter.x + dx * factor;
+            node.y = distortionCenter.y + dy * factor;
+          }
+        });
+      };
 
       simulation.on("tick", () => {
+        // Apply fisheye distortion if enabled
+        if (enableFisheye && distortionCenter) {
+          applyFisheyeDistortion();
+        }
+        
         g.selectAll(".links line")
-          .attr("x1", (d: any) => {
+          .attr("x1", function(d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
-            return sourceNode?.x ?? 0; // Fallback to 0 if node not found
+            if (!sourceNode) return 0;
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            if (!targetNode) return sourceNode.x ?? 0;
+            
+            // Calculate source radius
+            const sourceRadius = getNodeRadius(sourceNode.id);
+            const sx = sourceNode.x ?? 0;
+            const sy = sourceNode.y ?? 0;
+            const tx = targetNode.x ?? 0;
+            const ty = targetNode.y ?? 0;
+            
+            // Calculate angle
+            const dx = tx - sx;
+            const dy = ty - sy;
+            const angle = Math.atan2(dy, dx);
+            
+            // Start line at edge of source node
+            return sx + (sourceRadius * Math.cos(angle));
           })
-          .attr("y1", (d: any) => {
+          .attr("y1", function(d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
-            return sourceNode?.y ?? 0; // Fallback to 0
-          })
-          .attr("x2", (d: any) => {
+            if (!sourceNode) return 0;
             const targetNode = nodeMap.get(
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
-            return targetNode?.x ?? 0; // Fallback to 0
+            if (!targetNode) return sourceNode.y ?? 0;
+            
+            // Calculate source radius
+            const sourceRadius = getNodeRadius(sourceNode.id);
+            const sx = sourceNode.x ?? 0;
+            const sy = sourceNode.y ?? 0;
+            const tx = targetNode.x ?? 0;
+            const ty = targetNode.y ?? 0;
+            
+            // Calculate angle
+            const dx = tx - sx;
+            const dy = ty - sy;
+            const angle = Math.atan2(dy, dx);
+            
+            // Start line at edge of source node
+            return sy + (sourceRadius * Math.sin(angle));
           })
-          .attr("y2", (d: any) => {
+          .attr("x2", function(d: any): number {
             const targetNode = nodeMap.get(
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
-            return targetNode?.y ?? 0; // Fallback to 0
+            if (!targetNode) return 0;
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            if (!sourceNode) return targetNode.x ?? 0;
+            
+            // Calculate target radius
+            const targetRadius = getNodeRadius(targetNode.id);
+            const sx = sourceNode.x ?? 0;
+            const sy = sourceNode.y ?? 0;
+            const tx = targetNode.x ?? 0;
+            const ty = targetNode.y ?? 0;
+            
+            // Calculate angle
+            const dx = sx - tx;
+            const dy = sy - ty;
+            const angle = Math.atan2(dy, dx);
+            
+            // End line at edge of target node
+            return tx + (targetRadius * Math.cos(angle));
+          })
+          .attr("y2", function(d: any): number {
+            const targetNode = nodeMap.get(
+              typeof d.target === "object" ? d.target.id : d.target
+            ) as D3Node | undefined;
+            if (!targetNode) return 0;
+            const sourceNode = nodeMap.get(
+              typeof d.source === "object" ? d.source.id : d.source
+            ) as D3Node | undefined;
+            if (!sourceNode) return targetNode.y ?? 0;
+            
+            // Calculate target radius
+            const targetRadius = getNodeRadius(targetNode.id);
+            const sx = sourceNode.x ?? 0;
+            const sy = sourceNode.y ?? 0;
+            const tx = targetNode.x ?? 0;
+            const ty = targetNode.y ?? 0;
+            
+            // Calculate angle
+            const dx = sx - tx;
+            const dy = sy - ty;
+            const angle = Math.atan2(dy, dx);
+            
+            // End line at edge of target node
+            return ty + (targetRadius * Math.sin(angle));
           });
+
+        // ... rest of the existing code ...
+
         g.selectAll(".links text")
-          .attr("x", (d: any) => {
+          .attr("x", function(d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -559,7 +1140,7 @@ export default function GraphView({
             ) as D3Node | undefined;
             return ((sourceNode?.x ?? 0) + (targetNode?.x ?? 0)) / 2;
           })
-          .attr("y", (d: any) => {
+          .attr("y", function(d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -584,9 +1165,9 @@ export default function GraphView({
 
       linkElements
         .append("line")
-        .attr("stroke", d3LinkColor)
+        .attr("stroke", getThemeColors().linkColor) // Use theme link color
         .attr("stroke-opacity", 0)
-        .attr("stroke-width", 1.5)
+        .attr("stroke-width", 2) // Increased from 1.5
         .attr("marker-end", "url(#arrow)")
         .attr("data-id", (d: D3Link) => d.id)
         .style("cursor", "pointer")
@@ -594,77 +1175,100 @@ export default function GraphView({
           event.stopPropagation();
           // Reset node selection and edit states
           setSelectedNode(null);
+          selectedNodeRef.current = null;
           setConnectedNodes([]);
           setIsEditing(false);
           // Set relationship selection
           setSelectedRelationship(d);
+          selectedRelationshipRef.current = d;
           setIsEditingRelationship(false);
           if (onRelationshipSelected) {
             onRelationshipSelected(d);
           }
           
-          // Highlight only this relationship and its connected nodes
           const t = d3.transition().duration(300);
           const { textColor } = getThemeColors();
           const sourceId = typeof d.source === "object" ? d.source.id : d.source;
           const targetId = typeof d.target === "object" ? d.target.id : d.target;
 
-          // Dim all nodes
-          g.selectAll(".nodes g")
-            .selectAll(".node-circle")
+          // First dim ALL elements
+          // Dim all nodes and circles
+          g.selectAll(".nodes g .node-circle")
             .transition(t)
-            .attr("opacity", 0.25)
+            .attr("opacity", 0.15)
+            .style("opacity", 0.15)
             .attr("stroke-width", 1);
-          
-          // Dim ALL text elements
-          g.selectAll(".nodes g")
-            .selectAll("text")
+            
+          // Forcefully dim ALL text elements with both attr and style
+          g.selectAll(".nodes g .node-name-text")
             .transition(t)
-            .attr("opacity", 0.2);
-
+            .attr("opacity", 0.08)
+            .style("opacity", 0.08);
+            
+          g.selectAll(".nodes g .node-type-text")
+            .transition(t)
+            .attr("opacity", 0.08)
+            .style("opacity", 0.08);
+          
           // Dim all relationships
           g.selectAll(".links line")
             .transition(t)
             .attr("stroke-opacity", 0.15)
+            .style("stroke-opacity", 0.15)
             .attr("stroke-width", 1);
-          
+            
           g.selectAll(".links text")
             .transition(t)
-            .attr("opacity", 0.15);
-
-          // Highlight the relationship line (in same group as the text)
+            .attr("opacity", 0.1)
+            .style("opacity", 0.1);
+          
+          // Highlight this relationship line
           const parentElement = (event.currentTarget as Element).parentNode as Element;
           if (parentElement) {
             d3.select(parentElement)
               .select("line")
               .transition(t)
               .attr("stroke-opacity", 1)
+              .style("stroke-opacity", 1)
               .attr("stroke-width", 2.5)
               .attr("stroke", textColor);
+              
+            d3.select(parentElement)
+              .select("text")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("font-weight", "bold")
+              .attr("fill", textColor);
           }
-          
-          // Highlight this relationship text
-          d3.select(event.currentTarget as Element)
-            .transition(t)
-            .attr("opacity", 1)
-            .attr("font-weight", "bold")
-            .attr("fill", textColor);
 
           // Highlight the connected nodes
-          const connectedNodeSelector = g.selectAll(".nodes g")
-            .filter(function(d: any) { 
-              return d.id === sourceId || d.id === targetId;
+          g.selectAll(".nodes g")
+            .filter(function(nodeData: any) {
+              return nodeData.id === sourceId || nodeData.id === targetId;
+            })
+            .each(function() {
+              const node = d3.select(this);
+              
+              // Highlight circle
+              node.select(".node-circle")
+                .transition(t)
+                .attr("opacity", 0.9)
+                .style("opacity", 0.9)
+                .attr("stroke-width", 2);
+              
+              // Highlight text - force with both attr and style
+              node.select(".node-name-text")
+                .transition(t)
+                .attr("opacity", 0.8)
+                .style("opacity", 0.8)
+                .attr("fill", "#FFFFFF");
+                
+              node.select(".node-type-text")
+                .transition(t)
+                .attr("opacity", 0.8)
+                .style("opacity", 0.8);
             });
-            
-          connectedNodeSelector.selectAll(".node-circle")
-            .transition(t)
-            .attr("opacity", 1)
-            .attr("stroke-width", 2)
-            .attr("stroke", textColor);
-          
-          connectedNodeSelector.selectAll("text")
-            .transition(t)
-            .attr("opacity", 1);
         })
         .transition()
         .delay(800)
@@ -675,15 +1279,15 @@ export default function GraphView({
         .append("defs")
         .append("marker")
         .attr("id", "arrow")
-        .attr("viewBox", "0 -5 10 10")
-        .attr("refX", 28)
+        .attr("viewBox", "0 -5 17 17")
+        .attr("refX", 15) // Reduced from 28 to account for lines ending at node edges
         .attr("refY", 0)
-        .attr("markerWidth", 5)
-        .attr("markerHeight", 5)
-        .attr("orient", "auto-start-reverse")
+        .attr("markerWidth", 5) // Increased from 5
+        .attr("markerHeight", 5) // Increased from 5
+        .attr("orient", "auto")
         .append("path")
-        .attr("fill", d3TextColor)
-        .attr("d", "M0,-5L10,0L0,5");
+        .attr("fill", getThemeColors().textColor) // Use the theme color function
+        .attr("d", "M0,-5L10,0L0,5Z"); // Added Z to close the path for a solid arrowhead
 
       linkElements
         .append("text")
@@ -693,91 +1297,117 @@ export default function GraphView({
         .attr("dy", "-5")
         .attr("fill", textColor)
         .attr("opacity", 0)
+        .style("opacity", 0)
         .style("pointer-events", "all")
         .style("cursor", "pointer")
         .on("click", (event: MouseEvent, d: D3Link) => {
           event.stopPropagation();
           // Reset node selection and edit states
           setSelectedNode(null);
+          selectedNodeRef.current = null;
           setConnectedNodes([]);
           setIsEditing(false);
           // Set relationship selection
           setSelectedRelationship(d);
+          selectedRelationshipRef.current = d;
           setIsEditingRelationship(false);
           if (onRelationshipSelected) {
             onRelationshipSelected(d);
           }
           
-          // Highlight only this relationship and its connected nodes
           const t = d3.transition().duration(300);
           const { textColor } = getThemeColors();
           const sourceId = typeof d.source === "object" ? d.source.id : d.source;
           const targetId = typeof d.target === "object" ? d.target.id : d.target;
 
-          // Dim all nodes
-          g.selectAll(".nodes g")
-            .selectAll(".node-circle")
+          // First dim ALL elements
+          // Dim all nodes and circles
+          g.selectAll(".nodes g .node-circle")
             .transition(t)
-            .attr("opacity", 0.25)
+            .attr("opacity", 0.15)
+            .style("opacity", 0.15)
             .attr("stroke-width", 1);
-          
-          // Dim ALL text elements
-          g.selectAll(".nodes g")
-            .selectAll("text")
+            
+          // Forcefully dim ALL text elements with both attr and style
+          g.selectAll(".nodes g .node-name-text")
             .transition(t)
-            .attr("opacity", 0.2);
-
+            .attr("opacity", 0.08)
+            .style("opacity", 0.08);
+            
+          g.selectAll(".nodes g .node-type-text")
+            .transition(t)
+            .attr("opacity", 0.08)
+            .style("opacity", 0.08);
+          
           // Dim all relationships
           g.selectAll(".links line")
             .transition(t)
             .attr("stroke-opacity", 0.15)
+            .style("stroke-opacity", 0.15)
             .attr("stroke-width", 1);
-          
+            
           g.selectAll(".links text")
             .transition(t)
-            .attr("opacity", 0.15);
-
-          // Highlight the relationship line (in same group as the text)
+            .attr("opacity", 0.1)
+            .style("opacity", 0.1);
+          
+          // Highlight this relationship line
           const parentElement = (event.currentTarget as Element).parentNode as Element;
           if (parentElement) {
             d3.select(parentElement)
               .select("line")
               .transition(t)
               .attr("stroke-opacity", 1)
+              .style("stroke-opacity", 1)
               .attr("stroke-width", 2.5)
               .attr("stroke", textColor);
+              
+            d3.select(parentElement)
+              .select("text")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("font-weight", "bold")
+              .attr("fill", textColor);
           }
-          
-          // Highlight this relationship text
-          d3.select(event.currentTarget as Element)
-            .transition(t)
-            .attr("opacity", 1)
-            .attr("font-weight", "bold")
-            .attr("fill", textColor);
 
           // Highlight the connected nodes
-          const connectedNodeSelector = g.selectAll(".nodes g")
-            .filter(function(d: any) { 
-              return d.id === sourceId || d.id === targetId;
+          g.selectAll(".nodes g")
+            .filter(function(nodeData: any) {
+              return nodeData.id === sourceId || nodeData.id === targetId;
+            })
+            .each(function() {
+              const node = d3.select(this);
+              
+              // Highlight circle
+              node.select(".node-circle")
+                .transition(t)
+                .attr("opacity", 0.9)
+                .style("opacity", 0.9)
+                .attr("stroke-width", 2);
+              
+              // Highlight text - force with both attr and style
+              node.select(".node-name-text")
+                .transition(t)
+                .attr("opacity", 0.8)
+                .style("opacity", 0.8)
+                .attr("fill", "#FFFFFF");
+                
+              node.select(".node-type-text")
+                .transition(t)
+                .attr("opacity", 0.8)
+                .style("opacity", 0.8);
             });
-            
-          connectedNodeSelector.selectAll(".node-circle")
-            .transition(t)
-            .attr("opacity", 1)
-            .attr("stroke-width", 2)
-            .attr("stroke", textColor);
-          
-          connectedNodeSelector.selectAll("text")
-            .transition(t)
-            .attr("opacity", 1);
         })
         .transition()
         .delay(1000)
         .duration(500)
-        .attr("opacity", 0.7);
+        .attr("opacity", 0.7)
+        .style("opacity", 0.7);
 
       const drag = d3
         .drag<Element, D3Node>()
+        .clickDistance(5) // Allow clicks up to 5 pixels of movement
         .on("start", (event, d) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
           d.fx = d.x;
@@ -965,151 +1595,171 @@ export default function GraphView({
           );
       });
 
-      nodeElements.on("click", (event: MouseEvent, d: D3Node) => {
+      nodeElements.on("click", (event: MouseEvent, clickedNode: D3Node) => {
+        // Stop propagation and prevent default to ensure the SVG click handler doesn't fire
         event.stopPropagation();
-        const newlyConnected = getConnectedNodeIds(d.id);
+        event.preventDefault();
+        
+        console.log("Node clicked:", clickedNode.id);
+        
+        const newlyConnected = getConnectedNodeIds(clickedNode.id);
+        
         // Reset relationship selection and edit states
         setSelectedRelationship(null);
+        selectedRelationshipRef.current = null;
         setIsEditingRelationship(false);
+        
         // Set node selection
-        setSelectedNode(d);
+        setSelectedNode(clickedNode);
+        selectedNodeRef.current = clickedNode;
         setConnectedNodes(newlyConnected);
         setShowCategorized(true);
         setIsEditing(false);
+        
+        // Set view mode to selection
+        setViewMode('selection');
 
         if (onNodeSelected) {
-          onNodeSelected(d);
+          onNodeSelected(clickedNode);
         }
 
         const t = d3.transition().duration(300);
-        const { textColor } = getThemeColors();
-
-        // First, dim ALL node elements
-        g.selectAll(".nodes g")
-          .selectAll(".node-circle")
-          .transition(t)
-          .attr("opacity", 0.25)
-          .attr("stroke-width", 1);
-          
-        // Forcefully dim ALL text elements by selecting them directly
-        g.selectAll(".nodes g")
-          .selectAll("text")
-          .transition(t)
-          .attr("opacity", 0.2);
         
-        // Dim all relationships
+        // Get theme colors directly to avoid dependency issues
+        const isDarkTheme =
+          resolvedTheme === "dark" ||
+          document.documentElement.classList.contains("dark") ||
+          document.documentElement.getAttribute("data-theme") === "dark";
+        
+        const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
+
+        // IMPORTANT: Create sets for faster lookup
+        const selectedNodeId = clickedNode.id;
+        const connectedNodeIds = new Set(newlyConnected);
+
+        // First dim ALL nodes and text to create a clean slate
+        g.selectAll(".nodes g .node-circle")
+          .transition(t)
+          .attr("opacity", 0.15)
+          .style("opacity", 0.15)
+          .attr("stroke-width", 1);
+        
+        // Dim ALL text elements using direct selection and double styling
+        // Use very low opacity (0.08) for better contrast with highlighted nodes
+        g.selectAll(".nodes g .node-name-text")
+          .transition(t)
+          .attr("opacity", 0.08)
+          .style("opacity", 0.08)
+          .attr("fill", "#FFFFFF"); // Keep white color but very dim
+        
+        g.selectAll(".nodes g .node-type-text")
+          .transition(t)
+          .attr("opacity", 0.08)
+          .style("opacity", 0.08);
+
+        // Dim relationships
         g.selectAll(".links line")
           .transition(t)
           .attr("stroke-opacity", 0.15)
+          .style("stroke-opacity", 0.15)
           .attr("stroke-width", 1);
         
         g.selectAll(".links text")
           .transition(t)
-          .attr("opacity", 0.15);
-
-        // Then highlight the selected node
-        const selectedSvgNode = d3.select(event.currentTarget as Element);
-        selectedSvgNode.select(".node-circle")
-          .transition(t)
-          .attr("opacity", 1)
-          .attr("stroke-width", 2.5)
-          .attr("stroke", textColor);
-        
-        // Make ALL text elements for selected node visible
-        selectedSvgNode.selectAll("text")
-          .transition(t)
-          .attr("opacity", 1);
-
-        // Highlight connected nodes
-        const connectedNodes = g.selectAll(".nodes g")
-          .filter(function(n: any) { 
-            return newlyConnected.includes(n.id);
+          .attr("opacity", 0.1)
+          .style("opacity", 0.1);
+          
+        // THEN highlight the selected node and its connected nodes
+        // Apply highlighting to selected node 
+        g.selectAll(".nodes g")
+          .filter(function(d: any) { return d.id === selectedNodeId; })
+          .each(function() {
+            const node = d3.select(this);
+            
+            // Circle
+            node.select(".node-circle")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1) // Force with style too
+              .attr("stroke-width", 2.5)
+              .attr("stroke", textColor);
+              
+            // Text elements - force with both attr and style
+            node.select(".node-name-text")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("fill", "#FFFFFF");
+              
+            node.select(".node-type-text")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1);
           });
-        
-        connectedNodes.selectAll(".node-circle")
-          .transition(t)
-          .attr("opacity", 0.9)
-          .attr("stroke-width", 2);
-        
-        // Make ALL text elements for connected nodes partially visible
-        connectedNodes.selectAll("text")
-          .transition(t)
-          .attr("opacity", 0.8);
-
+          
+        // Apply highlighting to connected nodes
+        g.selectAll(".nodes g")
+          .filter(function(d: any) { return connectedNodeIds.has(d.id); })
+          .each(function() {
+            const node = d3.select(this);
+            
+            // Circle
+            node.select(".node-circle")
+              .transition(t)
+              .attr("opacity", 0.8)
+              .style("opacity", 0.8)
+              .attr("stroke-width", 1.5);
+              
+            // Text elements - force with both attr and style
+            node.select(".node-name-text")
+              .transition(t)
+              .attr("opacity", 0.7)
+              .style("opacity", 0.7)
+              .attr("fill", "#FFFFFF");
+              
+            node.select(".node-type-text")
+              .transition(t)
+              .attr("opacity", 0.7)
+              .style("opacity", 0.7);
+          });
+          
         // Highlight related relationships
-        const relatedLinks = g.selectAll(".links g").filter(
-          function(l: any) {
-            const sourceId = typeof l.source === "object" ? l.source.id : l.source;
-            const targetId = typeof l.target === "object" ? l.target.id : l.target;
-            return sourceId === d.id || targetId === d.id;
+        g.selectAll(".links g").each(function(d: any) {
+          const relationship = d3.select(this);
+          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
+          const targetId = typeof d.target === "object" ? d.target.id : d.target;
+          
+          // Check if this relationship is connected to the selected node
+          const isRelated = (sourceId === selectedNodeId || targetId === selectedNodeId);
+          
+          if (isRelated) {
+            // Highlight related relationship
+            relationship.select("line")
+              .transition(t)
+              .attr("stroke-opacity", 0.8)
+              .style("stroke-opacity", 0.8)
+              .attr("stroke-width", 2)
+              .attr("stroke", textColor);
+            
+            relationship.select("text")
+              .transition(t)
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("font-weight", "bold")
+              .attr("fill", textColor);
           }
-        );
-        
-        relatedLinks.selectAll("line")
-          .transition(t)
-          .attr("stroke-opacity", 0.8)
-          .attr("stroke-width", 2)
-          .attr("stroke", textColor);
-        
-        relatedLinks.selectAll("text")
-          .transition(t)
-          .attr("opacity", 1)
-          .attr("font-weight", "bold")
-          .attr("fill", textColor);
+        });
       });
 
-      svg.on("click", () => {
-        setSelectedNode(null);
-        setSelectedRelationship(null);
-        setConnectedNodes([]);
-        setShowCategorized(false);
-        setIsEditing(false);
-        setIsEditingRelationship(false);
-
-        if (onNodeSelected) {
-          onNodeSelected(null);
-        }
-
-        const t = d3.transition().duration(300);
-
-        const { textColor, linkColor } = getThemeColors();
-
-        const nodeElements = d3.select(svgRef.current).selectAll(".nodes g");
-        nodeElements
-          .selectAll(".node-circle")
-          .transition(t)
-          .attr("opacity", 1)
-          .attr(
-            "stroke",
-            (n: any) =>
-              d3
-                .color(nodeColors[n.label] || defaultColor)
-                ?.darker(0.7)
-                .toString() || d3NodeBorderColor
-          )
-          .attr("stroke-width", 1.5);
-        nodeElements
-          .selectAll(".node-name-text")
-          .transition(t)
-          .attr("opacity", 1)
-          .attr("fill", "#FFFFFF");
-        nodeElements
-          .selectAll(".node-type-text")
-          .transition(t)
-          .attr("opacity", 1);
-        d3.select(svgRef.current)
-          .selectAll(".links line")
-          .transition(t)
-          .attr("stroke", linkColor)
-          .attr("stroke-opacity", 0.5)
-          .attr("stroke-width", 1.5);
-        d3.select(svgRef.current)
-          .selectAll(".links text")
-          .transition(t)
-          .attr("fill", textColor)
-          .attr("opacity", 0.7)
-          .attr("font-weight", "normal");
-      });
+      // Create a transition for following svg operations
+      const t = d3.transition().duration(300);
+      
+      svg.selectAll(".links text")
+        .transition(t)
+        .attr("fill", textColor)
+        .attr("opacity", 0.7)
+        .style("opacity", 0.7)
+        .attr("font-weight", "normal");
 
       simulationRef.current = simulation;
 
@@ -1124,112 +1774,6 @@ export default function GraphView({
     };
   }, [data, theme, resolvedTheme, initialized, nodeColors]);
 
-  // Create a separate useEffect for the SVG click handler that avoids blinking
-  useEffect(() => {
-    // Skip if not initialized yet or no SVG reference
-    if (!initialized || !svgRef.current) return;
-
-    // Create a one-time flag to track if this is the first click
-    let isFirstClick = true;
-
-    // Get the SVG element
-    const svg = d3.select(svgRef.current);
-    
-    // Remove any existing click handlers first
-    svg.on("click", null);
-    
-    // Add our new handler
-    svg.on("click", () => {
-      // If first click and no selection, don't apply visual changes
-      if (isFirstClick && !selectedNode && !selectedRelationship) {
-        isFirstClick = false;
-        
-        // Just update state without visual changes
-        setSelectedNode(null);
-        setSelectedRelationship(null);
-        setConnectedNodes([]);
-        setShowCategorized(false);
-        setIsEditing(false);
-        setIsEditingRelationship(false);
-
-        if (onNodeSelected) {
-          onNodeSelected(null);
-        }
-        
-        return;
-      }
-      
-      // Not first click, proceed as normal
-      setSelectedNode(null);
-      setSelectedRelationship(null);
-      setConnectedNodes([]);
-      setShowCategorized(false);
-      setIsEditing(false);
-      setIsEditingRelationship(false);
-
-      if (onNodeSelected) {
-        onNodeSelected(null);
-      }
-
-      const t = d3.transition().duration(300);
-      
-      // Get theme colors directly to avoid reference issues
-      const isDarkTheme =
-        resolvedTheme === "dark" ||
-        document.documentElement.classList.contains("dark") ||
-        document.documentElement.getAttribute("data-theme") === "dark";
-
-      const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
-      const linkColor = isDarkTheme ? "#606060" : "#C0C0C0";
-      const borderColor = getComputedStyle(document.documentElement)
-        .getPropertyValue("--border")
-        .trim();
-
-      // Apply visual changes
-      svg.selectAll(".nodes g")
-        .selectAll(".node-circle")
-        .transition(t)
-        .attr("opacity", 1)
-        .attr(
-          "stroke",
-          (n: any) =>
-            d3
-              .color(nodeColors[n.label] || defaultColor)
-              ?.darker(0.7)
-              .toString() || `hsl(${borderColor})`
-        )
-        .attr("stroke-width", 1.5);
-
-      svg.selectAll(".nodes g")
-        .selectAll(".node-name-text")
-        .transition(t)
-        .attr("opacity", 1)
-        .attr("fill", "#FFFFFF");
-
-      svg.selectAll(".nodes g")
-        .selectAll(".node-type-text")
-        .transition(t)
-        .attr("opacity", 1);
-
-      svg.selectAll(".links line")
-        .transition(t)
-        .attr("stroke", linkColor)
-        .attr("stroke-opacity", 0.5)
-        .attr("stroke-width", 1.5);
-
-      svg.selectAll(".links text")
-        .transition(t)
-        .attr("fill", textColor)
-        .attr("opacity", 0.7)
-        .attr("font-weight", "normal");
-    });
-    
-    // Cleanup handler when component unmounts or re-initializes
-    return () => {
-      svg.on("click", null);
-    };
-  }, [initialized, nodeColors, onNodeSelected, selectedNode, selectedRelationship, resolvedTheme]);
-
   // First, let's fix the updateThemeColors function to avoid unnecessary repaints
   useEffect(() => {
     if (!initialized || !svgRef.current) return;
@@ -1239,26 +1783,45 @@ export default function GraphView({
 
       const svg = d3.select(svgRef.current!);
 
-      // Instead of immediately updating colors, check if we need to update
-      const currentNodeNameColor = svg.select(".node-name-text").attr("fill");
-      const currentLinkTextColor = svg.select(".links text").attr("fill");
+      // Safely select elements and check if they exist before calling .attr
+      const nodeNameEl = svg.select(".node-name-text").node();
+      const linkTextEl = svg.select(".links text").node();
       
-      // Only update if colors are actually different or undefined
-      if (!currentLinkTextColor || currentLinkTextColor !== textColor) {
-        svg.selectAll(".links text").attr("fill", textColor);
+      // Only update node name color if elements exist
+      if (nodeNameEl) {
+        svg.selectAll(".node-name-text").attr("fill", "#FFFFFF");
       }
 
-      // For node name text, we'll always keep it white regardless of theme
-      svg.selectAll(".node-name-text").attr("fill", "#FFFFFF");
+      // Only update link text if elements exist
+      if (linkTextEl) {
+        const currentLinkTextColor = linkTextEl ? d3.select(linkTextEl).attr("fill") : null;
+        if (!currentLinkTextColor || currentLinkTextColor !== textColor) {
+          svg.selectAll(".links text").attr("fill", textColor);
+        }
+      }
 
-      // Type text and other elements should update with theme
+      // Safely select and update other elements
       svg.selectAll(".node-type-text").attr("fill", mutedForegroundColor);
-      svg.select("#arrow path").attr("fill", textColor);
-      svg.selectAll(".links line").attr("stroke", linkColor);
+      
+      const arrowEl = svg.select("#arrow path").node();
+      if (arrowEl) {
+        svg.select("#arrow path").attr("fill", textColor);
+      }
+      
+      const linksEl = svg.selectAll(".links line").node();
+      if (linksEl) {
+        svg.selectAll(".links line").attr("stroke", linkColor);
+      }
     };
 
     // Use a timeout instead of requestAnimationFrame to reduce the chance of flickering
-    const updateTimeout = setTimeout(updateThemeColors, 50);
+    const updateTimeout = setTimeout(() => {
+      try {
+        updateThemeColors();
+      } catch (err) {
+        console.error("Error updating theme colors:", err);
+      }
+    }, 150);
 
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
@@ -1268,7 +1831,13 @@ export default function GraphView({
             mutation.attributeName === "data-theme")
         ) {
           // Again, use timeout instead of requestAnimationFrame
-          const themeChangeTimeout = setTimeout(updateThemeColors, 50);
+          const themeChangeTimeout = setTimeout(() => {
+            try {
+              updateThemeColors();
+            } catch (err) {
+              console.error("Error updating theme colors on theme change:", err);
+            }
+          }, 150);
           return () => clearTimeout(themeChangeTimeout);
         }
       });
@@ -1427,11 +1996,16 @@ export default function GraphView({
   useEffect(() => {
     // Exit early if nothing to do
     if (!searchHighlight || !initialized || !svgRef.current || !data.nodes.length) {
+      // If search is cleared, update view mode only if we're in search mode
+      if (viewMode === 'search' && !searchHighlight) {
+        setViewMode('standard');
+        matchingNodeIdsRef.current = new Set();
+      }
       return;
     }
 
-    // Skip if node or relationship is selected
-    if (selectedNode || selectedRelationship) {
+    // Skip if we have a relationship selected
+    if (selectedRelationship) {
       return;
     }
 
@@ -1451,41 +2025,116 @@ export default function GraphView({
       }
     });
 
+    // Store matching nodes in ref for other handlers to access
+    matchingNodeIdsRef.current = matchingNodeIds;
+
     // If no matching nodes, exit early
     if (matchingNodeIds.size === 0) {
+      setViewMode('standard');
+      // Dispatch event to indicate no results were found
+      window.dispatchEvent(new CustomEvent('searchResultsCount', { 
+        detail: { count: 0, term: searchHighlight } 
+      }));
       return;
     }
 
-    // Small delay to ensure D3 has finished rendering
+    // Set view mode to search unless we're already in selection mode
+    if (viewMode !== 'selection') {
+      setViewMode('search');
+    }
+
+    // Create an event to signal the count of matched nodes
+    window.dispatchEvent(new CustomEvent('searchResultsCount', { 
+      detail: { count: matchingNodeIds.size, term: searchHighlight } 
+    }));
+
+    // Small delay to ensure D3 has finished rendering, then apply search highlighting
     setTimeout(() => {
       try {
-        const { textColor } = getThemeColors();
+        // Skip if we're already in selection mode (a node is selected)
+        if (viewMode === 'selection' || selectedNode) return;
+
+        // Get theme colors directly instead of using function from deps
+        const isDarkTheme =
+          resolvedTheme === "dark" ||
+          document.documentElement.classList.contains("dark") ||
+          document.documentElement.getAttribute("data-theme") === "dark";
+
+        const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
         
         // Use D3 to select elements for better control
         const svg = d3.select(svgEl);
         
-        // First, dim all nodes
+        // Setup zoom behavior that matches the original zoom behavior
+        const zoom = d3.zoom()
+          .scaleExtent([0.1, 8])
+          .on("zoom", (event) => {
+            // Find the container group
+            const g = svg.select("g g");
+            if (g.size() > 0) {
+              g.attr("transform", event.transform);
+            }
+          });
+          
+        // Make sure the SVG has zoom behavior
+        svg.call(zoom as any);
+        
+        // Calculate appropriate zoom level based on number of matches
+        // More nodes = more zoomed out
+        const zoomScale = matchingNodeIds.size > 10 ? 0.3 : 
+                         matchingNodeIds.size > 5 ? 0.4 : 
+                         matchingNodeIds.size > 2 ? 0.5 : 0.7;
+                        
+        // Use a smoother transition for better UX
+        svg.transition()
+          .duration(850)
+          .ease(d3.easeCubicOut)
+          .call(
+            zoom.transform as any, 
+            d3.zoomIdentity.scale(zoomScale).translate(
+              window.innerWidth / 4, 
+              window.innerHeight / 4
+            )
+          );
+        
+        // Remove any previous search indicators (avoid duplicates)
+        svg.selectAll('.search-indicator').remove();
+        
+        // Create transitions for all elements (same as in click handler)
+        const t = d3.transition().duration(300);
+        
+        // First, dim all nodes with transitions
         svg.selectAll('.nodes g .node-circle')
-          .attr('opacity', 0.25)
+          .transition(t)
+          .attr('opacity', 0.15)
+          .style('opacity', 0.15)
           .attr('stroke-width', 1);
         
-        // Dim ALL text elements using a direct selection
+        // Dim ALL text elements using transitions and the same approach as click handler
         svg.selectAll('.nodes g .node-name-text')
-          .attr('opacity', 0.2)
-          .attr('fill', '#FFFFFF'); // Keep white color for all node names
+          .transition(t)
+          .attr('opacity', 0.08)
+          .style('opacity', 0.08)
+          .attr('fill', '#FFFFFF'); // Keep white color but very dim
         
         svg.selectAll('.nodes g .node-type-text')
-          .attr('opacity', 0.2);
+          .transition(t)
+          .attr('opacity', 0.08)
+          .style('opacity', 0.08);
         
-        // Dim relationships
+        // Dim relationships with transitions
         svg.selectAll('.links line')
+          .transition(t)
           .attr('stroke-opacity', 0.15)
+          .style('stroke-opacity', 0.15)
           .attr('stroke-width', 1);
         
         svg.selectAll('.links text')
-          .attr('opacity', 0.15);
+          .transition(t)
+          .attr('opacity', 0.1)
+          .style('opacity', 0.1);
         
-        // Highlight matching nodes
+        // Highlight matching nodes with transitions
         svg.selectAll('.nodes g')
           .filter(function() {
             const nodeId = Number(d3.select(this).attr('data-id'));
@@ -1496,18 +2145,24 @@ export default function GraphView({
             
             // Highlight the circle
             node.select('.node-circle')
+              .transition(t)
               .attr('opacity', 1)
+              .style('opacity', 1)
               .attr('stroke-width', 2.5)
               .attr('stroke', textColor);
             
-            // Highlight name text (keeping white color)
+            // Highlight name text with better forced visibility
             node.select('.node-name-text')
+              .transition(t)
               .attr('opacity', 1)
+              .style('opacity', 1)
               .attr('fill', '#FFFFFF');
             
             // Highlight type text
             node.select('.node-type-text')
-              .attr('opacity', 1);
+              .transition(t)
+              .attr('opacity', 1)
+              .style('opacity', 1);
           });
         
       } catch (error) {
@@ -1515,56 +2170,7 @@ export default function GraphView({
       }
     }, 100);
 
-    // Clean up function to restore normal appearance
-    return () => {
-      if (!svgEl || selectedNode || selectedRelationship) return;
-      
-      setTimeout(() => {
-        try {
-          const { textColor, linkColor } = getThemeColors();
-          const svg = d3.select(svgEl);
-          
-          // Restore node appearance
-          svg.selectAll('.nodes g').each(function() {
-            const node = d3.select(this);
-            const label = node.attr('data-label') || '';
-            
-            // Restore circle
-            node.select('.node-circle')
-              .attr('opacity', 1)
-              .attr('stroke-width', 1.5);
-            
-            // Restore original stroke color
-            const strokeColor = d3.color(nodeColors[label] || defaultColor)?.darker(0.7).toString() || 
-                              getComputedStyle(document.documentElement).getPropertyValue("--border").trim();
-            node.select('.node-circle').attr('stroke', strokeColor);
-            
-            // Restore name text with white color
-            node.select('.node-name-text')
-              .attr('opacity', 1)
-              .attr('fill', '#FFFFFF');
-            
-            // Restore type text
-            node.select('.node-type-text')
-              .attr('opacity', 1);
-          });
-          
-          // Restore relationship appearance
-          svg.selectAll('.links line')
-            .attr('stroke-opacity', 0.5)
-            .attr('stroke-width', 1.5)
-            .attr('stroke', linkColor);
-            
-          svg.selectAll('.links text')
-            .attr('opacity', 0.7)
-            .attr('font-weight', 'normal')
-            .attr('fill', textColor);
-        } catch (error) {
-          console.error("Error resetting search highlighting:", error);
-        }
-      }, 100);
-    };
-  }, [searchHighlight, initialized, data.nodes, selectedNode, selectedRelationship, nodeColors]);
+  }, [searchHighlight, initialized, svgRef, data.nodes, selectedNode, selectedRelationship, viewMode, resolvedTheme]);
 
   return (
     <div className="flex flex-col h-full w-full relative isolate">

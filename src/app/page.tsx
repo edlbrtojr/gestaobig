@@ -1,3 +1,5 @@
+'use client';
+
 import Link from "next/link";
 import {
   Waypoints,
@@ -10,8 +12,11 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import LottieWaves from "@/components/lottie-animation";
+import { useOrgConfig } from "@/contexts/org-config-provider";
 
 export default function Home() {
+  const { config } = useOrgConfig();
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Hero Section */}
@@ -256,15 +261,15 @@ export default function Home() {
             <div className="mb-4 md:mb-0">
               <div className="flex items-center gap-3">
                 <Image
-                  src="/images/logo-fieac-azul.png"
-                  alt="FIEAC Logo"
+                  src={config.theme.lightLogo}
+                  alt={`${config.shortName} Logo`}
                   width={120}
                   height={40}
                   className="dark:hidden"
                 />
                 <Image
-                  src="/images/logo-fieac-branco.png"
-                  alt="FIEAC Logo"
+                  src={config.theme.darkLogo}
+                  alt={`${config.shortName} Logo`}
                   width={120}
                   height={40}
                   className="hidden dark:block"
@@ -278,8 +283,7 @@ export default function Home() {
             </div>
             <div className="text-center md:text-right text-gray-600 dark:text-gray-400">
               <p className="text-sm">
-                © {new Date().getFullYear()} Federação das Indústrias do Estado
-                do Acre. Todos os direitos reservados.
+                © {new Date().getFullYear()} {config.name}. {config.footerText}
               </p>
               <p className="text-xs mt-1">
                 Frigg - Tecelã de Conexões Estratégicas

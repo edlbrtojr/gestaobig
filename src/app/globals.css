@@ -60,19 +60,34 @@
   --sidebar-ring: oklch(0.7 0.1 var(--p, 250));
 }
 
-/* Adicionando transição para mudança de tema */
+/* Theme transition handling - for next-themes */
+/* Base state - instant changes */
 html {
-  transition: background-color 0s, color 0s, border-color 0s;
+  transition: none !important;
 }
 
-/* Classe aplicada durante a troca de tema */
-.theme-transition,
-.theme-transition *,
-.theme-transition *::before,
-.theme-transition *::after {
-  transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out,
-    border-color 0.3s ease-in-out, fill 0.3s ease-in-out,
-    stroke 0.3s ease-in-out !important;
+/* High-performance transitions by targeting only specific properties on specific elements */
+.theme-transition {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out !important;
+}
+
+/* Body background/color */
+.theme-transition body {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out !important;
+}
+
+/* Main UI containers */
+.theme-transition main,
+.theme-transition header,
+.theme-transition .sidebar,
+.theme-transition nav {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out, border-color 0.15s ease-out !important;
+}
+
+/* Interactive elements */
+.theme-transition button,
+.theme-transition a {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out, border-color 0.15s ease-out !important;
 }
 
 @theme inline {

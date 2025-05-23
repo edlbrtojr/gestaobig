@@ -8,6 +8,7 @@ import { Waypoints, Menu } from "lucide-react";
 
 import ThemeToggle from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { ConnectionStatus } from "@/components/ui/ConnectionStatus";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -27,6 +28,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useTheme } from "./theme-provider";
+import { useOrgConfig } from "@/contexts/org-config-provider";
 
 interface SiteHeaderProps {
   breadcrumbs?: React.ReactNode;
@@ -34,24 +36,67 @@ interface SiteHeaderProps {
 
 export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
   const { theme } = useTheme();
+  const { config } = useOrgConfig();
   const pathname = usePathname();
 
-  // Default breadcrumbs if none provided
-  const defaultBreadcrumbs = (
-    <Breadcrumb>
-      <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink href="/">Home</BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        {pathname === "/graph" && (
+  // Function to generate breadcrumbs based on pathname
+  const generateBreadcrumbs = () => {
+    const paths = pathname.split('/').filter(Boolean);
+    
+    // If we're on the home page, don't show breadcrumbs
+    if (paths.length === 0) return null;
+
+    const breadcrumbItems = paths.map((path, index) => {
+      const href = `/${paths.slice(0, index + 1).join('/')}`;
+      const isLast = index === paths.length - 1;
+      const label = getBreadcrumbLabel(path);
+
+      return (
+        <React.Fragment key={path}>
           <BreadcrumbItem>
-            <BreadcrumbPage>O Tear</BreadcrumbPage>
+            {isLast ? (
+              <BreadcrumbPage>{label}</BreadcrumbPage>
+            ) : (
+              <BreadcrumbLink href={href}>{label}</BreadcrumbLink>
+            )}
           </BreadcrumbItem>
-        )}
-      </BreadcrumbList>
-    </Breadcrumb>
-  );
+          {!isLast && <BreadcrumbSeparator />}
+        </React.Fragment>
+      );
+    });
+
+    return (
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/">Home</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          {breadcrumbItems}
+        </BreadcrumbList>
+      </Breadcrumb>
+    );
+  };
+
+  // Function to get human-readable labels for breadcrumbs
+  const getBreadcrumbLabel = (path: string): string => {
+    const labels: { [key: string]: string } = {
+      graph: 'O Tear',
+      dashboard: 'Dashboard',
+      settings: 'Configurações',
+      organization: 'Organização',
+      admin: 'Administração',
+      aplicativo: 'Aplicativo',
+      database: 'Banco de Dados',
+      appearance: 'Aparência',
+    };
+
+    return labels[path] || path.charAt(0).toUpperCase() + path.slice(1);
+  };
+
+  // Get the appropriate logos
+  const lightLogo = config?.theme?.lightLogo || "/images/logo-fieac-azul.png";
+  const darkLogo = config?.theme?.darkLogo || "/images/logo-fieac-branco.png";
 
   return (
     <header className="sticky top-0 z-40 w-full h-10 border-b border-border/40 bg-background">
@@ -64,16 +109,16 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
           <div className="md:hidden">
             <div className="relative h-8 w-32">
               <Image
-                src="/images/logo-fieac-azul.png"
-                alt="FIEAC Logo"
+                src={lightLogo}
+                alt={config?.name || "Organization Logo"}
                 className="dark:hidden"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
                 priority
               />
               <Image
-                src="/images/logo-fieac-branco.png"
-                alt="FIEAC Logo"
+                src={darkLogo}
+                alt={config?.name || "Organization Logo"}
                 className="hidden dark:block"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
@@ -84,11 +129,12 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
 
           {/* Breadcrumbs */}
           <div className="hidden sm:flex">
-            {breadcrumbs || defaultBreadcrumbs}
+            {breadcrumbs || generateBreadcrumbs()}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
+          <ConnectionStatus />
           <ThemeToggle />
 
           <DropdownMenu>
@@ -103,9 +149,9 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
             <DropdownMenuContent className="w-56" align="end" forceMount>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">FIEAC</p>
+                  <p className="text-sm font-medium leading-none">{config?.shortName || "FIEAC"}</p>
                   <p className="text-xs leading-none text-muted-foreground">
-                    usuario@fieac.org.br
+                    {config?.contactEmail || "usuario@fieac.org.br"}
                   </p>
                 </div>
               </DropdownMenuLabel>
@@ -116,7 +162,7 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>
-                <Link href="/configuracoes" className="w-full">
+                <Link href="/settings" className="w-full">
                   Configurações
                 </Link>
               </DropdownMenuItem>

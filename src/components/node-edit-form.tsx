@@ -288,8 +288,20 @@ export default function NodeEditForm({
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to delete node");
+        // Check if there's content to parse
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to delete node");
+          } catch (parseError) {
+            // If JSON parsing fails, use status text
+            throw new Error(`Failed to delete node: ${response.statusText}`);
+          }
+        } else {
+          // No JSON content
+          throw new Error(`Failed to delete node: ${response.statusText}`);
+        }
       }
 
       if (onDelete) {

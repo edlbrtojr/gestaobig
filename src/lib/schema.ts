@@ -76,60 +76,179 @@ const DEFAULT_SCHEMA: GraphSchema = {
   }
 };
 
+// Verificar se um schema é válido
+function isValidSchema(schema: any): boolean {
+  if (!schema) return false;
+  
+  try {
+    // Verificar se tem a estrutura básica esperada
+    if (!schema.nodeTypes || !schema.relationshipTypes) return false;
+    
+    // Verificar se nodeTypes é um objeto com pelo menos uma chave
+    if (typeof schema.nodeTypes !== 'object' || Object.keys(schema.nodeTypes).length === 0) return false;
+    
+    return true;
+  } catch (error) {
+    console.error("Erro ao validar schema:", error);
+    return false;
+  }
+}
+
+// Cache storage for schema to avoid repeated API calls
+let schemaCache: GraphSchema | null = null;
+let schemaCacheTimestamp = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Load schema from API, localStorage or use default
 export async function getGraphSchema(): Promise<GraphSchema> {
+  // If we're on the server, return default schema
   if (typeof window === 'undefined') {
     return DEFAULT_SCHEMA;
   }
   
+  // Use in-memory cache if available and not expired
+  const now = Date.now();
+  if (schemaCache && (now - schemaCacheTimestamp < CACHE_TTL)) {
+    return schemaCache;
+  }
+  
+  // First, try to load from localStorage for quick loading
   try {
-    // Try to fetch from API first
-    const response = await fetch('/api/schema');
-    
-    if (response.ok) {
-      return await response.json();
-    } else if (response.status !== 404) {
-      console.error("Failed to load schema from API:", response.statusText);
-    }
-    
-    // If not found in API (404), try localStorage as fallback
     const storedSchema = localStorage.getItem('graphSchema');
     if (storedSchema) {
-      return JSON.parse(storedSchema);
+      const parsedSchema = JSON.parse(storedSchema);
+      if (isValidSchema(parsedSchema)) {
+        console.log("Schema loaded from localStorage");
+        
+        // Update cache
+        schemaCache = parsedSchema;
+        schemaCacheTimestamp = now;
+        
+        // Try to update from API in the background to keep data fresh, but don't do it
+        // if we've updated recently to avoid excessive API calls
+        if (now - schemaCacheTimestamp > 60000) { // Only check once per minute at most
+          fetch('/api/schema')
+            .then(response => {
+              if (response.ok) return response.json();
+              throw new Error(`API responded with status ${response.status}`);
+            })
+            .then(apiSchema => {
+              if (isValidSchema(apiSchema)) {
+                // Compare schemas to see if there's any change
+                const schemaChanged = JSON.stringify(apiSchema) !== JSON.stringify(schemaCache);
+                
+                if (schemaChanged) {
+                  localStorage.setItem('graphSchema', JSON.stringify(apiSchema));
+                  console.log("Schema updated in background");
+                  // Update cache
+                  schemaCache = apiSchema;
+                  schemaCacheTimestamp = Date.now();
+                  // Notify components
+                  window.dispatchEvent(new CustomEvent('schemaUpdated', { detail: apiSchema }));
+                }
+              }
+            })
+            .catch(error => {
+              console.warn("Could not update schema in background:", error);
+            });
+        }
+        
+        return parsedSchema;
+      }
     }
   } catch (error) {
-    console.error("Failed to load schema:", error);
+    console.warn("Failed to load schema from localStorage:", error);
   }
+  
+  // If not in localStorage or invalid, try from API
+  try {
+    // Try to fetch from API with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);  // 5 second timeout
+    
+    const response = await fetch('/api/schema', {
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeoutId));
+    
+    if (response.ok) {
+      const apiSchema = await response.json();
+      
+      // Validate and save in localStorage if valid
+      if (isValidSchema(apiSchema)) {
+        try {
+          localStorage.setItem('graphSchema', JSON.stringify(apiSchema));
+        } catch (e) {
+          console.error("Failed to update localStorage with API schema:", e);
+        }
+        
+        // Update cache
+        schemaCache = apiSchema;
+        schemaCacheTimestamp = now;
+        
+        console.log("Schema loaded from API");
+        return apiSchema;
+      } else {
+        console.error("API returned invalid schema");
+      }
+    } else {
+      console.error("Failed to load schema from API:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error loading schema from API:", error);
+  }
+  
+  // If we got here, use default schema
+  console.log("Using default schema");
+  
+  // Update cache with default schema
+  schemaCache = DEFAULT_SCHEMA;
+  schemaCacheTimestamp = now;
   
   return DEFAULT_SCHEMA;
 }
 
 // Save schema to both API and localStorage
 export async function saveGraphSchema(schema: GraphSchema): Promise<boolean> {
+  if (!isValidSchema(schema)) {
+    console.error("Tentativa de salvar um schema inválido");
+    return false;
+  }
+  
   try {
-    // Save to API
-    const response = await fetch('/api/schema', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(schema),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to save schema: ${response.statusText}`);
-    }
-    
-    // Also save to localStorage as a cache
+    // Primeiro, salvar no localStorage para garantir persistência
     localStorage.setItem('graphSchema', JSON.stringify(schema));
+    
+    // Então, tentar salvar na API
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);  // 5 segundos de timeout
+      
+      const response = await fetch('/api/schema', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(schema),
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      
+      if (!response.ok) {
+        console.warn(`API respondeu com erro ao salvar schema: ${response.statusText}`);
+      } else {
+        console.log("Schema salvo com sucesso na API");
+      }
+    } catch (apiError) {
+      console.error("Erro ao salvar schema na API:", apiError);
+      // Nós continuamos porque já salvamos no localStorage
+    }
     
     // Dispatch event to notify components
     window.dispatchEvent(new CustomEvent('schemaUpdated', { detail: schema }));
     
     return true;
   } catch (error) {
-    console.error("Failed to save schema:", error);
-    throw error;
+    console.error("Falha ao salvar schema:", error);
+    return false;
   }
 }
 

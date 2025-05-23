@@ -62,6 +62,8 @@ export default function GraphPage() {
 
   // Create a ref to track if we're already fetching data to prevent multiple calls
   const isFetchingRef = useRef(false);
+  // Ref to track if component is mounted
+  const isMountedRef = useRef(true);
 
   // Flag to track if this is the first filter update
   const isFirstFilterUpdate = useRef(true);
@@ -216,6 +218,12 @@ export default function GraphPage() {
         "relationships"
       );
 
+      // Check if component is still mounted before updating state
+      if (!isMountedRef.current) {
+        console.log("Component unmounted, skipping state update");
+        return;
+      }
+
       // Update the graph data
       setGraphData(data);
 
@@ -233,11 +241,15 @@ export default function GraphPage() {
       isFirstFilterUpdate.current = true;
     } catch (err) {
       console.error("Failed to fetch graph data:", err);
-      setError(
-        "Falha ao carregar os dados do grafo. Verifique se o Neo4j está em execução."
-      );
+      if (isMountedRef.current) {
+        setError(
+          "Falha ao carregar os dados do grafo. Verifique se o Neo4j está em execução."
+        );
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
       // Release the lock
       isFetchingRef.current = false;
     }
@@ -266,6 +278,18 @@ export default function GraphPage() {
       setIsLoading(false);
     }
   }, [fetchGraphData]);
+
+  // Track component mount/unmount to prevent state updates after unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false; 
+      // Clear any pending timeouts
+      if (filterDebounceRef.current) {
+        clearTimeout(filterDebounceRef.current);
+      }
+    };
+  }, []);
 
   // Fetch graph data on component mount
   useEffect(() => {
@@ -296,6 +320,32 @@ export default function GraphPage() {
     },
     [graphData, computeFilteredData]
   );
+  
+  // Listen for search cleared events
+  useEffect(() => {
+    // Add event listener for searchCleared event
+    const handleSearchCleared = () => {
+      // Only update if we have current filters
+      if (currentFilters) {
+        // Create a new filters object with search cleared but other properties preserved
+        const updatedFilters = {
+          ...currentFilters,
+          search: ''
+        };
+        
+        // Update filters using the existing handler
+        handleFilterChange(updatedFilters);
+      }
+    };
+    
+    // Add event listener
+    window.addEventListener('searchCleared', handleSearchCleared);
+    
+    return () => {
+      // Remove event listener
+      window.removeEventListener('searchCleared', handleSearchCleared);
+    };
+  }, [currentFilters, handleFilterChange]);
 
   // Handle node selection in the graph
   const handleNodeSelected = useCallback(
@@ -487,12 +537,16 @@ export default function GraphPage() {
                     </div>
                   </div>
                 )}
-                <GraphContainer
-                  data={filteredData}
-                  onNodeSelected={handleNodeSelected}
-                  onRelationshipSelected={handleRelationshipSelected}
-                  searchTerm={currentFilters?.search}
-                />
+                {!isLoading && (
+                  <GraphContainer
+                    key={`graph-${filteredData.nodes.length}-${filteredData.relationships.length}`}
+                    data={filteredData}
+                    onNodeSelected={handleNodeSelected}
+                    onRelationshipSelected={handleRelationshipSelected}
+                    searchTerm={currentFilters?.search}
+                    onFilterChange={handleFilterChange}
+                  />
+                )}
               </div>
             </div>
 

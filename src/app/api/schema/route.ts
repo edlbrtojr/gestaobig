@@ -15,24 +15,67 @@ export async function GET() {
     `;
 
     const result = await executeRead<QueryResult>(query);
+    
+    if (!result) {
+      console.warn("Falha na consulta do esquema, o banco de dados pode estar indisponível");
+      // Return empty schema instead of failing
+      return NextResponse.json(
+        {
+          nodeTypes: {},
+          relationshipTypes: {},
+          status: "error",
+          message: "Banco de dados indisponível"
+        },
+        {
+          headers: {
+            // Add cache control headers to prevent excessive requests
+            'Cache-Control': 'public, max-age=60, s-maxage=300',
+          },
+        }
+      );
+    }
+    
     const schemaData = result.records[0]?.get("schema");
 
     if (!schemaData) {
-      // If no schema is found, return a 404 status
-      return NextResponse.json(
-        { error: "Schema not found" },
-        { status: 404 }
-      );
+      // Default empty schema if none found
+      const defaultSchema: GraphSchema = {
+        nodeTypes: {},
+        relationshipTypes: {}
+      };
+      return NextResponse.json(defaultSchema, {
+        headers: {
+          // Add cache control headers to prevent excessive requests
+          'Cache-Control': 'public, max-age=60, s-maxage=300',
+        },
+      });
     }
 
     // Parse the schema from the JSON string
     const schema = JSON.parse(schemaData);
-    return NextResponse.json(schema);
+    
+    // Add cache control headers to allow caching for 5 minutes
+    return NextResponse.json(schema, {
+      headers: {
+        'Cache-Control': 'public, max-age=60, s-maxage=300',
+      },
+    });
   } catch (error) {
     console.error("Error fetching schema:", error);
+    // Return empty schema instead of failing
     return NextResponse.json(
-      { error: "Failed to fetch schema" },
-      { status: 500 }
+      {
+        nodeTypes: {},
+        relationshipTypes: {},
+        status: "error",
+        message: "Falha ao obter esquema"
+      },
+      {
+        headers: {
+          // Add cache control headers even for error responses
+          'Cache-Control': 'public, max-age=30',
+        },
+      }
     );
   }
 }
@@ -48,7 +91,7 @@ export async function POST(request: NextRequest) {
     // Validate the schema
     if (!schema || !schema.nodeTypes || !schema.relationshipTypes) {
       return NextResponse.json(
-        { error: "Invalid schema format" },
+        { error: "Formato de esquema inválido" },
         { status: 400 }
       );
     }
@@ -61,15 +104,26 @@ export async function POST(request: NextRequest) {
       RETURN config
     `;
 
-    await executeWrite<QueryResult>(query, {
+    const result = await executeWrite<QueryResult>(query, {
       schema: JSON.stringify(schema)
     });
+    
+    if (!result) {
+      return NextResponse.json(
+        { 
+          success: false,
+          status: "error",
+          message: "Banco de dados indisponível" 
+        }, 
+        { status: 503 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error saving schema:", error);
     return NextResponse.json(
-      { error: "Failed to save schema" },
+      { error: "Falha ao salvar esquema" },
       { status: 500 }
     );
   }

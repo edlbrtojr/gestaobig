@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
+import { useOrganizationConfig } from "@/components/org-config-provider";
 
 // App navigation data
 const navItems = [
@@ -98,6 +99,14 @@ export function NavItems() {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { config } = useOrganizationConfig();
+  
+  // Get the appropriate logos from organization config
+  const lightLogo = config?.theme?.lightLogo || "/images/logo-fieac-azul.png";
+  const darkLogo = config?.theme?.darkLogo || "/images/logo-fieac-branco.png";
+  const orgName = config?.shortName || "FIEAC";
+  const footerText = config?.footerText || `© ${new Date().getFullYear()} FIEAC`;
+  
   return (
     <Sidebar
       collapsible="icon"
@@ -110,16 +119,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <div className="hidden group-data-[state=expanded]:flex items-center w-full gap-2">
             <div className="relative h-15 w-25">
               <Image
-                src="/images/logo-fieac-azul.png"
-                alt="FIEAC Logo"
+                src={lightLogo}
+                alt={`${orgName} Logo`}
                 className="dark:hidden"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
                 priority
               />
               <Image
-                src="/images/logo-fieac-branco.png"
-                alt="FIEAC Logo"
+                src={darkLogo}
+                alt={`${orgName} Logo`}
                 className="hidden dark:block"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
@@ -137,16 +146,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <div className="flex group-data-[state=expanded]:hidden flex-col items-center justify-center w-full gap-2">
             <div className="relative h-6 w-16">
               <Image
-                src="/images/logo-fieac-azul.png"
-                alt="FIEAC Logo"
+                src={lightLogo}
+                alt={`${orgName} Logo`}
                 className="dark:hidden"
                 fill
                 style={{ objectFit: "contain", objectPosition: "center" }}
                 priority
               />
               <Image
-                src="/images/logo-fieac-branco.png"
-                alt="FIEAC Logo"
+                src={darkLogo}
+                alt={`${orgName} Logo`}
                 className="hidden dark:block"
                 fill
                 style={{ objectFit: "contain", objectPosition: "center" }}
@@ -175,7 +184,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter className="mt-auto p-2 border-t border-sidebar-border">
         <div className="hidden group-data-[state=expanded]:block text-center">
           <p className="text-xs text-muted-foreground/70">
-            © {new Date().getFullYear()} FIEAC
+            {footerText}
           </p>
         </div>
       </SidebarFooter>

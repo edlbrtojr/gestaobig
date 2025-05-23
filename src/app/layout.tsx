@@ -1,23 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import ThemeProvider from "@/components/theme-provider";
-import { AppSidebar } from "@/components/app-sidebar";
-import { SiteHeader } from "@/components/site-header";
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { OrgConfigProvider } from "@/components/org-config-provider";
+import { BodyContent } from "@/components/body-content";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
   subsets: ["latin"],
-  display: "swap",
+  variable: "--font-geist-sans",
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
   subsets: ["latin"],
-  display: "swap",
+  variable: "--font-geist-mono",
 });
 
+// Metadata will be overridden by dynamic metadata in the app
 export const metadata: Metadata = {
   title: "Frigg | Tecelã de Estratégias",
   description:
@@ -45,32 +44,22 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning className="scroll-smooth">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} min-h-screen w-screen max-w-full font-sans antialiased overflow-x-hidden`}
-      >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <SidebarProvider defaultOpen={false}>
-            <div className="flex h-screen w-full overflow-hidden bg-background relative">
-              <AppSidebar className="z-50" />
-
-              <SidebarInset className="flex flex-col flex-1 w-full">
-                <SiteHeader />
-                <main className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950">
-                  <div className="w-full max-w-full">{children}</div>
-                </main>
-              </SidebarInset>
-            </div>
-          </SidebarProvider>
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen font-sans antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <OrgConfigProvider>
+            <BodyContent>
+              {children}
+            </BodyContent>
+            <Toaster richColors closeButton position="top-right" />
+          </OrgConfigProvider>
         </ThemeProvider>
       </body>
     </html>
