@@ -94,100 +94,100 @@ export const relationsPartTwo = async (runQuery: Function) => {
     CREATE (o)-[:VIABILIZA]->(e)
   `);
 
-  // Relações entre Departamentos e Planos de Ação
+  // Relações entre Unidades e Planos de Ação
   await runQuery(`
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     MATCH (p:PlanoDeAcao {name: "Revisar política de backup"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     MATCH (p:PlanoDeAcao {name: "Modernização tecnológica"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Jurídico"})
+    MATCH (d:Unidade {name: "Jurídico"})
     MATCH (p:PlanoDeAcao {name: "Implementar LGPD"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Comercial"})
+    MATCH (d:Unidade {name: "Comercial"})
     MATCH (p:PlanoDeAcao {name: "Expansão regional"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Recursos Humanos"})
+    MATCH (d:Unidade {name: "Recursos Humanos"})
     MATCH (p:PlanoDeAcao {name: "Programa de retenção"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Financeiro"})
+    MATCH (d:Unidade {name: "Financeiro"})
     MATCH (p:PlanoDeAcao {name: "Otimização fiscal"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Operações"})
+    MATCH (d:Unidade {name: "Operações"})
     MATCH (p:PlanoDeAcao {name: "Diversificação fornecedores"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Marketing"})
+    MATCH (d:Unidade {name: "Marketing"})
     MATCH (p:PlanoDeAcao {name: "Campanha rebranding"})
     CREATE (d)-[:RESPONSAVEL_POR]->(p)
   `);
 
-  // Relações entre Departamentos e Estratégias
+  // Relações entre Unidades e Estratégias
   await runQuery(`
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     MATCH (e:Estrategia {name: "Segurança da informação"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     MATCH (e:Estrategia {name: "Transformação digital"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Jurídico"})
+    MATCH (d:Unidade {name: "Jurídico"})
     MATCH (e:Estrategia {name: "Conformidade regulatória"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Comercial"})
+    MATCH (d:Unidade {name: "Comercial"})
     MATCH (e:Estrategia {name: "Crescimento de mercado"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Operações"})
+    MATCH (d:Unidade {name: "Operações"})
     MATCH (e:Estrategia {name: "Eficiência operacional"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Financeiro"})
+    MATCH (d:Unidade {name: "Financeiro"})
     MATCH (e:Estrategia {name: "Sustentabilidade financeira"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Pesquisa e Desenvolvimento"})
+    MATCH (d:Unidade {name: "Pesquisa e Desenvolvimento"})
     MATCH (e:Estrategia {name: "Inovação de produtos"})
     CREATE (d)-[:APOIA]->(e)
   `);
 
   await runQuery(`
-    MATCH (d:Departamento {name: "Recursos Humanos"})
+    MATCH (d:Unidade {name: "Recursos Humanos"})
     MATCH (e:Estrategia {name: "Cultura organizacional"})
     CREATE (d)-[:APOIA]->(e)
   `);

@@ -76,15 +76,15 @@ export async function POST() {
       CREATE (o5:Oportunidade {name: "ESG", description: "Iniciativas ambientais e sociais", potential: "Médio", area: "Sustentabilidade", company: "SESI,IEL"})
       CREATE (o6:Oportunidade {name: "Novas linhas de produtos", description: "Desenvolvimento de novos segmentos", potential: "Alto", area: "P&D", company: "SENAI"})
       
-      // Departamentos
-      CREATE (d1:Departamento {name: "Tecnologia da Informação", sigla: "TI", diretor: "Carlos Silva", headcount: 42, company: "SENAI"})
-      CREATE (d2:Departamento {name: "Recursos Humanos", sigla: "RH", diretor: "Ana Paula Souza", headcount: 15, company: "IEL"})
-      CREATE (d3:Departamento {name: "Financeiro", sigla: "FIN", diretor: "Roberto Mendes", headcount: 28, company: "FIEAC"})
-      CREATE (d4:Departamento {name: "Marketing", sigla: "MKT", diretor: "Juliana Costa", headcount: 23, company: "SISTEMA FIEAC"})
-      CREATE (d5:Departamento {name: "Comercial", sigla: "COM", diretor: "Fernando Almeida", headcount: 65, company: "SESI,SENAI"})
-      CREATE (d6:Departamento {name: "Operações", sigla: "OPS", diretor: "Márcia Santos", headcount: 78, company: "SESI"})
-      CREATE (d7:Departamento {name: "Jurídico", sigla: "JUR", diretor: "Paulo Oliveira", headcount: 12, company: "FIEAC"})
-      CREATE (d8:Departamento {name: "Pesquisa e Desenvolvimento", sigla: "P&D", diretor: "Luciana Martins", headcount: 31, company: "SENAI"})
+      // Unidades
+      CREATE (d1:Unidade {name: "Tecnologia da Informação", sigla: "TI", diretor: "Carlos Silva", headcount: 42, company: "SENAI"})
+      CREATE (d2:Unidade {name: "Recursos Humanos", sigla: "RH", diretor: "Ana Paula Souza", headcount: 15, company: "IEL"})
+      CREATE (d3:Unidade {name: "Financeiro", sigla: "FIN", diretor: "Roberto Mendes", headcount: 28, company: "FIEAC"})
+      CREATE (d4:Unidade {name: "Marketing", sigla: "MKT", diretor: "Juliana Costa", headcount: 23, company: "SISTEMA FIEAC"})
+      CREATE (d5:Unidade {name: "Comercial", sigla: "COM", diretor: "Fernando Almeida", headcount: 65, company: "SESI,SENAI"})
+      CREATE (d6:Unidade {name: "Operações", sigla: "OPS", diretor: "Márcia Santos", headcount: 78, company: "SESI"})
+      CREATE (d7:Unidade {name: "Jurídico", sigla: "JUR", diretor: "Paulo Oliveira", headcount: 12, company: "FIEAC"})
+      CREATE (d8:Unidade {name: "Pesquisa e Desenvolvimento", sigla: "P&D", diretor: "Luciana Martins", headcount: 31, company: "SENAI"})
       
       // Projetos - Novos projetos específicos para cada empresa
       CREATE (pr1:Projeto {name: "Modernização ERP", orcamento: 1200000, inicio: "2023-01", fim: "2023-12", status: "Em andamento", company: "SISTEMA FIEAC"})

@@ -34,7 +34,7 @@ const defaultNodeColors: Record<string, string> = {
   Visao: "#9C27B0", // Purple
   Missao: "#673AB7", // Deep Purple
   Oportunidade: "#FF9800", // Orange
-  Departamento: "#009688", // Teal
+  Unidade: "#009688", // Teal
   Projeto: "#3F51B5", // Indigo
   Objetivo: "#E91E63", // Pink
   KPI: "#795548", // Brown
@@ -54,7 +54,7 @@ const labelColors: Record<string, string> = {
   Visao: "#FFFFFF", // White on Purple
   Missao: "#FFFFFF", // White on Deep Purple
   Oportunidade: "#FFFFFF", // White on Orange
-  Departamento: "#FFFFFF", // White on Teal
+  Unidade: "#FFFFFF", // White on Teal
   Projeto: "#FFFFFF", // White on Indigo
   Objetivo: "#FFFFFF", // White on Pink
   KPI: "#FFFFFF", // White on Brown
@@ -186,7 +186,7 @@ export default function GraphView({
   const [hierarchyLevels, setHierarchyLevels] = useState<Record<number, number>>({});
   // Add state for fisheye distortion center
   const [distortionCenter, setDistortionCenter] = useState<{x: number, y: number} | null>(null);
-  const [enableFisheye, setEnableFisheye] = useState(false);
+  const [enableFisheye, setEnableFisheye] = useState(false); // Keep this off by default
   const [groupCentersMap, setGroupCentersMap] = useState<Record<string, {x: number, y: number, r: number}>>({});
 
   // Load node colors from schema
@@ -600,15 +600,15 @@ export default function GraphView({
 
       const getNodeRadius = (nodeId: number): number => {
         const connectionCount = connectionCounts.get(nodeId) || 0;
-        const minRadius = 18; // Increased from 15 (15 * 1.2 = 18)
-        const maxRadius = 54; // Increased from 45 (45 * 1.2 = 54)
+        const minRadius = 22; // Increased from 18 for better visibility
+        const maxRadius = 60; // Increased from 54 for more prominent nodes
         const minConnections = 0;
         const maxConnections = Math.max(
           ...Array.from(connectionCounts.values())
         );
         if (maxConnections === minConnections) return minRadius;
 
-        // Apply non-linear scaling to emphasize differences in connection count
+        // Use a smoother scaling function with square root for more even distribution
         const connectionFactor =
           Math.sqrt(connectionCount - minConnections) /
           Math.sqrt(maxConnections - minConnections);
@@ -913,85 +913,37 @@ export default function GraphView({
           d3
             .forceLink(validLinks)
             .id((d: any) => d.id)
-            .distance(180) // Increased from 140 to add more space between nodes
-            .strength((d) => {
-              // Use stronger link strength for nodes with fewer connections
-              const sourceId = typeof d.source === "object" ? d.source.id : d.source;
-              const targetId = typeof d.target === "object" ? d.target.id : d.target;
-              const sourceCount = connectionCounts.get(sourceId) || 0;
-              const targetCount = connectionCounts.get(targetId) || 0;
-              // Higher strength for nodes with fewer connections
-              return 0.2 + (1.5 / (sourceCount + targetCount + 1)); // Reduced from 0.25 to allow more spacing
-            })
+            .distance(250) // Increased from 180 to spread nodes further apart
+            .strength(0.15) // Reduced from dynamic value to a constant lower value for looser connections
         )
         .force("charge", d3.forceManyBody()
-          .strength((d) => {
-            // Adjust charge based on connections: isolated nodes have less repulsion
-            const count = connectionCounts.get((d as D3Node).id) || 0;
-            // Adjust repulsion based on node type/label for semantic clustering
-            const nodeFactor = (d as D3Node).label === 'Risco' ? 1.3 : 
-                              (d as D3Node).label === 'PlanoDeAcao' ? 0.9 : 
-                              1.0;
-            return count === 0 ? -300 * nodeFactor : -700 * nodeFactor;
-          })
-          .distanceMax(500) // Increased from 300 to 500 to extend the effective range of the charge
+          .strength(-1200) // Stronger repulsion to push nodes further apart
+          .distanceMax(800) // Increased from 500 to extend the effective range of the charge
         )
         .force(
           "center",
-          d3.forceCenter(containerWidth / 2, containerHeight / 2).strength(0.05) // Reduced centering force
+          d3.forceCenter(containerWidth / 2, containerHeight / 2).strength(0.03) // Reduced centering force
         )
         .force(
           "collide",
-          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 35).strength(1) // Increased from 30 to 35 spacing and strength from lower to 1
+          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 50).strength(0.7) // Increased spacing and reduced strength
         )
-        // Add a weaker X and Y force for isolated nodes
-        .force("x", d3.forceX(containerWidth / 2).strength((d) => {
-          const count = connectionCounts.get((d as D3Node).id) || 0;
-          return count === 0 ? 0.01 : 0.03; // Weaker for isolated nodes
-        }))
-        // Enhanced hierarchical layout with Y force based on hierarchy levels
-        .force("y-hierarchy", d3.forceY((d: any) => {
-          const nodeId = (d as D3Node).id;
-          const level = hierarchyLevels[nodeId] || 0;
-          // Position nodes vertically based on hierarchy level
-          // Higher-level nodes (parents) at the top, children below
-          const verticalSpacing = 120; // Pixels per hierarchy level
-          return (containerHeight / 2) - (containerHeight * 0.3) + (level * verticalSpacing);
-        }).strength(0.2)) // Moderate strength to allow other forces to still influence position
-        // Add a clustering force to pull isolated nodes toward connected ones
-        .force("cluster", d3.forceRadial(
+        // Remove type-based clustering and hierarchy constraints
+        // Add a simple radial force to distribute isolated nodes
+        .force("radial", d3.forceRadial(
           (d) => {
             const count = connectionCounts.get((d as D3Node).id) || 0;
-            // Isolated nodes are placed at a medium radius around the center
-            // Connected nodes can be anywhere based on other forces
-            return count === 0 ? containerWidth * 0.3 : 0;
+            // Give isolated nodes a slight outward push
+            return count === 0 ? containerWidth * 0.4 : containerWidth * 0.2;
           },
           containerWidth / 2,
           containerHeight / 2
-        ).strength((d) => {
-          const count = connectionCounts.get((d as D3Node).id) || 0;
-          return count === 0 ? 0.1 : 0; // Only apply to isolated nodes
-        }))
-        // Add semantic clustering using forceRadial for each group type
-        .force("semantic-cluster", d3.forceRadial(
-          (d: any) => {
-            // Get the orbit radius for this node's label group
-            const label = (d as D3Node).label;
-            return groupCenters[label]?.r || 0;
-          },
-          (d: any) => {
-            // Get the x-coordinate for this node's label group
-            const label = (d as D3Node).label;
-            return groupCenters[label]?.x || containerWidth / 2;
-          },
-          (d: any) => {
-            // Get the y-coordinate for this node's label group
-            const label = (d as D3Node).label;
-            return groupCenters[label]?.y || containerHeight / 2;
-          }
-        ).strength(0.15)) // Moderate strength to create visible clustering but not override other forces
-        .alpha(0.3)
-        .alphaDecay(0.005); // Slower decay (from 0.01) for smoother settling
+        ).strength(0.05)) // Very gentle force
+        .alpha(0.6) // Higher initial energy for more dynamic movement
+        .alphaDecay(0.008); // Slightly faster decay for quicker stabilization
+
+      // Add a velocity decay parameter to slow down node movement more gradually
+      simulation.velocityDecay(0.3); // Default is 0.4, lower value = more fluid movement
 
       // Apply fisheye distortion if enabled
       const applyFisheyeDistortion = () => {
@@ -1167,7 +1119,7 @@ export default function GraphView({
         .append("line")
         .attr("stroke", getThemeColors().linkColor) // Use theme link color
         .attr("stroke-opacity", 0)
-        .attr("stroke-width", 2) // Increased from 1.5
+        .attr("stroke-width", 2.5) // Increased from 2 for better visibility
         .attr("marker-end", "url(#arrow)")
         .attr("data-id", (d: D3Link) => d.id)
         .style("cursor", "pointer")
@@ -1273,7 +1225,7 @@ export default function GraphView({
         .transition()
         .delay(800)
         .duration(500)
-        .attr("stroke-opacity", 0.5);
+        .attr("stroke-opacity", 0.6); // Increased from 0.5 for better visibility
 
       svg
         .append("defs")
@@ -1292,14 +1244,15 @@ export default function GraphView({
       linkElements
         .append("text")
         .text((d: D3Link) => d.type)
-        .attr("font-size", "9px")
+        .attr("font-size", "11px") // Increased from 9px for better readability
         .attr("text-anchor", "middle")
-        .attr("dy", "-5")
+        .attr("dy", "-7") // Increased from -5 to move away from the line
         .attr("fill", textColor)
         .attr("opacity", 0)
         .style("opacity", 0)
         .style("pointer-events", "all")
         .style("cursor", "pointer")
+        .style("font-weight", "600") // Add font-weight for better visibility
         .on("click", (event: MouseEvent, d: D3Link) => {
           event.stopPropagation();
           // Reset node selection and edit states
@@ -1402,8 +1355,8 @@ export default function GraphView({
         .transition()
         .delay(1000)
         .duration(500)
-        .attr("opacity", 0.7)
-        .style("opacity", 0.7);
+        .attr("opacity", 0.8) // Increased from 0.7
+        .style("opacity", 0.8); // Increased from 0.7
 
       const drag = d3
         .drag<Element, D3Node>()

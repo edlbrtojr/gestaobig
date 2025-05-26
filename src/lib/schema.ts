@@ -63,7 +63,7 @@ const DEFAULT_SCHEMA: GraphSchema = {
       type: "AFETA",
       description: "Indica que um nó afeta outro",
       sourceNodeTypes: ["Risco"],
-      targetNodeTypes: ["Projeto", "Objetivo", "Departamento"],
+      targetNodeTypes: ["Projeto", "Objetivo", "Unidade"],
       bidirectional: false
     },
     MITIGADO_POR: {

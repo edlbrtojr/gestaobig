@@ -46,7 +46,7 @@ O sistema foi desenvolvido para:
 - **Tomada de Decisão Informada**: Baseada em uma visão holística dos relacionamentos organizacionais
 - **Identificação Proativa**: Detecção antecipada de riscos e oportunidades interconectados
 - **Planejamento Estratégico Integrado**: Alinhamento de ações com objetivos estratégicos
-- **Colaboração Melhorada**: Interface compartilhada para diferentes departamentos analisarem informações
+- **Colaboração Melhorada**: Interface compartilhada para diferentes Unidades analisarem informações
 
 ## 5. Casos de Uso Típicos
 

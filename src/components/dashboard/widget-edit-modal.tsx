@@ -23,6 +23,7 @@ import { DashboardWidgetConfig } from "./dashboard-config";
 import { getGraphSchema } from "@/lib/schema";
 import { GraphSchema } from "@/lib/schema";
 import { Badge } from "@/components/ui/badge";
+import { getNumericPropertyNames, getCategoricalPropertyNames } from "@/lib/property-discovery";
 
 interface WidgetEditModalProps {
   widget: DashboardWidgetConfig | null;
@@ -39,6 +40,11 @@ export function WidgetEditModal({
 }: WidgetEditModalProps) {
   const [editedWidget, setEditedWidget] = useState<DashboardWidgetConfig | null>(null);
   const [schema, setSchema] = useState<GraphSchema>({ nodeTypes: {}, relationshipTypes: {} });
+  
+  // Add these state variables at the component top level instead of inside renderWidgetSpecificFields
+  const [sourceProperties, setSourceProperties] = useState<string[]>([]);
+  const [categoryProperties, setCategoryProperties] = useState<string[]>([]);
+  const [loadingProperties, setLoadingProperties] = useState<boolean>(false);
 
   // Carregar schema e inicializar widget editado quando o modal abrir
   useEffect(() => {
@@ -59,6 +65,34 @@ export function WidgetEditModal({
       loadSchema();
     }
   }, [open, widget]);
+
+  // Load properties when source node label or target node label changes
+  useEffect(() => {
+    const loadProperties = async () => {
+      if (!editedWidget?.config?.sourceNodeLabel) return;
+      
+      setLoadingProperties(true);
+      try {
+        // Load numeric properties for aggregation
+        const numericProps = await getNumericPropertyNames(editedWidget.config.sourceNodeLabel);
+        setSourceProperties(numericProps);
+        
+        // If we have a target node label, load its categorical properties
+        if (editedWidget.config.targetNodeLabel) {
+          const catProps = await getCategoricalPropertyNames(editedWidget.config.targetNodeLabel);
+          setCategoryProperties(catProps);
+        }
+      } catch (error) {
+        console.error("Error loading properties:", error);
+      } finally {
+        setLoadingProperties(false);
+      }
+    };
+    
+    if (editedWidget?.type === "advancedChart") {
+      loadProperties();
+    }
+  }, [editedWidget?.config?.sourceNodeLabel, editedWidget?.config?.targetNodeLabel, editedWidget?.type]);
 
   if (!editedWidget) {
     return null;
@@ -151,7 +185,7 @@ export function WidgetEditModal({
               <Label htmlFor="chartType">Tipo de Gráfico</Label>
               <Select
                 value={editedWidget.config.chartType || "pie"}
-                onValueChange={(value: "pie" | "bar") =>
+                onValueChange={(value: "pie" | "bar" | "line" | "donut" | "area" | "radar") =>
                   setEditedWidget({
                     ...editedWidget,
                     config: { ...editedWidget.config, chartType: value },
@@ -164,8 +198,52 @@ export function WidgetEditModal({
                 <SelectContent>
                   <SelectItem value="pie">Gráfico de Pizza</SelectItem>
                   <SelectItem value="bar">Gráfico de Barras</SelectItem>
+                  <SelectItem value="line">Gráfico de Linha</SelectItem>
+                  <SelectItem value="donut">Gráfico de Rosca</SelectItem>
+                  <SelectItem value="area">Gráfico de Área</SelectItem>
+                  <SelectItem value="radar">Gráfico Radar</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="colorScheme">Esquema de Cores</Label>
+              <Select
+                value={editedWidget.config.colorScheme || "default"}
+                onValueChange={(value: "default" | "blues" | "greens" | "oranges" | "purples" | "category10") =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, colorScheme: value },
+                  })
+                }
+              >
+                <SelectTrigger id="colorScheme">
+                  <SelectValue placeholder="Esquema de cores" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Padrão</SelectItem>
+                  <SelectItem value="blues">Azuis</SelectItem>
+                  <SelectItem value="greens">Verdes</SelectItem>
+                  <SelectItem value="oranges">Laranjas</SelectItem>
+                  <SelectItem value="purples">Roxos</SelectItem>
+                  <SelectItem value="category10">Categoria 10</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox"
+                id="showLegend"
+                checked={!!editedWidget.config.showLegend}
+                onChange={(e) =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, showLegend: e.target.checked },
+                  })
+                }
+              />
+              <Label htmlFor="showLegend">Mostrar Legenda</Label>
             </div>
 
             <div className="space-y-2">
@@ -285,6 +363,432 @@ export function WidgetEditModal({
           </>
         );
 
+      case "advancedChart":
+        return (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="sourceNodeLabel">Nó de Origem</Label>
+              <Select
+                value={editedWidget.config.sourceNodeLabel || ""}
+                onValueChange={(value) =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, sourceNodeLabel: value },
+                  })
+                }
+              >
+                <SelectTrigger id="sourceNodeLabel">
+                  <SelectValue placeholder="Selecione o tipo de nó de origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(schema.nodeTypes).map(([key, nodeType]) => (
+                    <SelectItem key={key} value={key}>
+                      {nodeType.label || key}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="propertyToAggregate">
+                Propriedade para Agregar
+                {loadingProperties && <span className="ml-2 text-xs text-muted-foreground">Carregando...</span>}
+              </Label>
+              <Select
+                value={editedWidget.config.propertyToAggregate || ""}
+                onValueChange={(value) =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: {
+                      ...editedWidget.config,
+                      propertyToAggregate: value,
+                    },
+                  })
+                }
+                disabled={!editedWidget.config.sourceNodeLabel || loadingProperties || sourceProperties.length === 0}
+              >
+                <SelectTrigger id="propertyToAggregate">
+                  <SelectValue placeholder={
+                    loadingProperties 
+                      ? "Carregando propriedades..." 
+                      : sourceProperties.length === 0 
+                        ? "Selecione o nó de origem primeiro" 
+                        : "Selecione a propriedade"
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {sourceProperties.map((prop) => (
+                    <SelectItem key={prop} value={prop}>
+                      {prop}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {sourceProperties.length === 0 && editedWidget.config.sourceNodeLabel && !loadingProperties && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Nenhuma propriedade numérica encontrada. Você pode inserir o nome da propriedade manualmente.
+                </p>
+              )}
+              {!editedWidget.config.sourceNodeLabel && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Selecione o nó de origem para ver as propriedades disponíveis
+                </p>
+              )}
+              {sourceProperties.length === 0 && (
+                <Input
+                  className="mt-2"
+                  id="manualPropertyToAggregate"
+                  value={editedWidget.config.propertyToAggregate || ""}
+                  onChange={(e) =>
+                    setEditedWidget({
+                      ...editedWidget,
+                      config: {
+                        ...editedWidget.config,
+                        propertyToAggregate: e.target.value,
+                      },
+                    })
+                  }
+                  placeholder="Digite o nome da propriedade (ex: valor, pontuação)"
+                />
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="aggregationMethod">Método de Agregação</Label>
+              <Select
+                value={editedWidget.config.aggregationMethod || "sum"}
+                onValueChange={(value: "sum" | "avg" | "count" | "min" | "max") =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, aggregationMethod: value },
+                  })
+                }
+              >
+                <SelectTrigger id="aggregationMethod">
+                  <SelectValue placeholder="Selecione o método de agregação" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sum">Soma</SelectItem>
+                  <SelectItem value="avg">Média</SelectItem>
+                  <SelectItem value="count">Contagem</SelectItem>
+                  <SelectItem value="min">Mínimo</SelectItem>
+                  <SelectItem value="max">Máximo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="border-t border-muted my-4 pt-4">
+              <p className="text-sm font-medium mb-2">Agrupar Por (Opcional)</p>
+              <p className="text-xs text-muted-foreground mb-4">
+                Você pode agrupar os resultados por uma propriedade no mesmo nó ou por um nó relacionado.
+              </p>
+            </div>
+
+            <div className="flex gap-2 items-center mb-4">
+              <input
+                type="checkbox"
+                id="useRelationship"
+                checked={!!editedWidget.config.targetNodeLabel}
+                onChange={(e) => {
+                  if (!e.target.checked) {
+                    setEditedWidget({
+                      ...editedWidget,
+                      config: {
+                        ...editedWidget.config,
+                        targetNodeLabel: undefined,
+                        relationshipType: undefined,
+                      },
+                    });
+                  }
+                }}
+              />
+              <Label htmlFor="useRelationship">Agrupar por nó relacionado</Label>
+            </div>
+
+            {!editedWidget.config.targetNodeLabel ? (
+              <div className="space-y-2">
+                <Label htmlFor="groupByProperty">Propriedade para Agrupar (no mesmo nó)</Label>
+                <Select
+                  value={editedWidget.config.groupByProperty || ""}
+                  onValueChange={(value) =>
+                    setEditedWidget({
+                      ...editedWidget,
+                      config: {
+                        ...editedWidget.config,
+                        groupByProperty: value,
+                      },
+                    })
+                  }
+                  disabled={!editedWidget.config.sourceNodeLabel || loadingProperties}
+                >
+                  <SelectTrigger id="groupByProperty">
+                    <SelectValue placeholder={
+                      loadingProperties 
+                        ? "Carregando propriedades..." 
+                        : "Selecione a propriedade para agrupar"
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sourceProperties.length > 0 && 
+                      sourceProperties.map((prop) => (
+                        <SelectItem key={prop} value={prop}>
+                          {prop}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  className="mt-2"
+                  id="manualGroupByProperty"
+                  value={editedWidget.config.groupByProperty || ""}
+                  onChange={(e) =>
+                    setEditedWidget({
+                      ...editedWidget,
+                      config: {
+                        ...editedWidget.config,
+                        groupByProperty: e.target.value,
+                      },
+                    })
+                  }
+                  placeholder="Digite o nome da propriedade (ex: categoria, departamento)"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="targetNodeLabel">Nó de Categoria</Label>
+                  <Select
+                    value={editedWidget.config.targetNodeLabel || ""}
+                    onValueChange={(value) =>
+                      setEditedWidget({
+                        ...editedWidget,
+                        config: { ...editedWidget.config, targetNodeLabel: value },
+                      })
+                    }
+                  >
+                    <SelectTrigger id="targetNodeLabel">
+                      <SelectValue placeholder="Selecione o tipo de nó de categoria" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(schema.nodeTypes).map(([key, nodeType]) => (
+                        <SelectItem key={key} value={key}>
+                          {nodeType.label || key}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="relationshipType">Tipo de Relacionamento</Label>
+                  <Select
+                    value={editedWidget.config.relationshipType || ""}
+                    onValueChange={(value) =>
+                      setEditedWidget({
+                        ...editedWidget,
+                        config: { ...editedWidget.config, relationshipType: value },
+                      })
+                    }
+                    disabled={!editedWidget.config.sourceNodeLabel || !editedWidget.config.targetNodeLabel}
+                  >
+                    <SelectTrigger id="relationshipType">
+                      <SelectValue placeholder="Selecione o tipo de relacionamento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(schema.relationshipTypes).map(([key, relType]) => (
+                        <SelectItem key={key} value={key}>
+                          {relType.type || key}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="groupByProperty">Propriedade para Agrupar (no nó de categoria)</Label>
+                  <Select
+                    value={editedWidget.config.groupByProperty || ""}
+                    onValueChange={(value) =>
+                      setEditedWidget({
+                        ...editedWidget,
+                        config: {
+                          ...editedWidget.config,
+                          groupByProperty: value,
+                        },
+                      })
+                    }
+                    disabled={!editedWidget.config.targetNodeLabel || loadingProperties}
+                  >
+                    <SelectTrigger id="groupByProperty">
+                      <SelectValue placeholder={
+                        loadingProperties 
+                          ? "Carregando propriedades..." 
+                          : "Selecione a propriedade para agrupar"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categoryProperties.length > 0 && 
+                        categoryProperties.map((prop) => (
+                          <SelectItem key={prop} value={prop}>
+                            {prop}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className="mt-2"
+                    id="manualGroupByProperty"
+                    value={editedWidget.config.groupByProperty || ""}
+                    onChange={(e) =>
+                      setEditedWidget({
+                        ...editedWidget,
+                        config: {
+                          ...editedWidget.config,
+                          groupByProperty: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="Digite o nome da propriedade (ex: nome, tipo)"
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="border-t border-muted my-4 pt-4">
+              <p className="text-sm font-medium mb-2">Opções de Visualização</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="topResults">Limite de Resultados</Label>
+              <Input
+                id="topResults"
+                type="number"
+                min="1"
+                step="1"
+                value={editedWidget.config.topResults || 10}
+                onChange={(e) => {
+                  // Parse as integer and ensure it's a positive number
+                  const value = parseInt(e.target.value);
+                  const safeValue = isNaN(value) || value < 1 ? 10 : Math.floor(value);
+                  
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: {
+                      ...editedWidget.config,
+                      topResults: safeValue,
+                    },
+                  })
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="sortDirection">Ordem de Classificação</Label>
+              <Select
+                value={editedWidget.config.sortDirection || "desc"}
+                onValueChange={(value: "asc" | "desc") =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, sortDirection: value },
+                  })
+                }
+              >
+                <SelectTrigger id="sortDirection">
+                  <SelectValue placeholder="Selecione a ordem de classificação" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Decrescente</SelectItem>
+                  <SelectItem value="asc">Crescente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="chartType">Tipo de Gráfico</Label>
+              <Select
+                value={editedWidget.config.chartType || "bar"}
+                onValueChange={(value: "pie" | "bar" | "line" | "donut" | "area" | "radar") =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, chartType: value },
+                  })
+                }
+              >
+                <SelectTrigger id="chartType">
+                  <SelectValue placeholder="Selecione o tipo de gráfico" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bar">Gráfico de Barras</SelectItem>
+                  <SelectItem value="pie">Gráfico de Pizza</SelectItem>
+                  <SelectItem value="line">Gráfico de Linha</SelectItem>
+                  <SelectItem value="donut">Gráfico de Rosca</SelectItem>
+                  <SelectItem value="area">Gráfico de Área</SelectItem>
+                  <SelectItem value="radar">Gráfico Radar</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="colorScheme">Esquema de Cores</Label>
+              <Select
+                value={editedWidget.config.colorScheme || "default"}
+                onValueChange={(value: "default" | "blues" | "greens" | "oranges" | "purples" | "category10") =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, colorScheme: value },
+                  })
+                }
+              >
+                <SelectTrigger id="colorScheme">
+                  <SelectValue placeholder="Esquema de cores" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Padrão</SelectItem>
+                  <SelectItem value="blues">Azuis</SelectItem>
+                  <SelectItem value="greens">Verdes</SelectItem>
+                  <SelectItem value="oranges">Laranjas</SelectItem>
+                  <SelectItem value="purples">Roxos</SelectItem>
+                  <SelectItem value="category10">Categoria 10</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox"
+                id="showLegend"
+                checked={!!editedWidget.config.showLegend}
+                onChange={(e) =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: { ...editedWidget.config, showLegend: e.target.checked },
+                  })
+                }
+              />
+              <Label htmlFor="showLegend">Mostrar Legenda</Label>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="height">Altura (px)</Label>
+              <Input
+                id="height"
+                type="number"
+                value={editedWidget.config.height || 400}
+                onChange={(e) =>
+                  setEditedWidget({
+                    ...editedWidget,
+                    config: {
+                      ...editedWidget.config,
+                      height: parseInt(e.target.value) || 400,
+                    },
+                  })
+                }
+              />
+            </div>
+          </>
+        );
+
       default:
         return null;
     }
@@ -300,7 +804,7 @@ export function WidgetEditModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4 space-y-4">
+        <div className="max-h-[60vh] overflow-y-auto pr-2 py-4 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="title">Título do Widget</Label>
             <Input

@@ -6,6 +6,7 @@ import { NodeSummaryCard } from "./node-summary-card";
 import { PropertyDistribution } from "./property-distribution";
 import { RelationshipChart } from "./relationship-chart";
 import { MiniGraph } from "./mini-graph";
+import { AdvancedChart } from "./advanced-chart";
 import { X, GripVertical, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WidgetEditModal } from "./widget-edit-modal";
@@ -119,6 +120,8 @@ function SortableWidgetItem({
             nodeLabel={widget.config.nodeLabel || ""}
             defaultProperty={widget.config.property}
             chartType={widget.config.chartType}
+            colorScheme={widget.config.colorScheme}
+            showLegend={widget.config.showLegend}
             height={widget.config.height}
           />
         );
@@ -137,6 +140,25 @@ function SortableWidgetItem({
             title={widget.title}
             filterOptions={widget.config.filterOptions}
             maxNodes={widget.config.maxNodes}
+            height={widget.config.height}
+          />
+        );
+
+      case "advancedChart":
+        return (
+          <AdvancedChart
+            title={widget.title}
+            sourceNodeLabel={widget.config.sourceNodeLabel || ""}
+            targetNodeLabel={widget.config.targetNodeLabel}
+            relationshipType={widget.config.relationshipType}
+            propertyToAggregate={widget.config.propertyToAggregate || ""}
+            aggregationMethod={widget.config.aggregationMethod || "sum"}
+            groupByProperty={widget.config.groupByProperty || ""}
+            sortDirection={widget.config.sortDirection}
+            topResults={widget.config.topResults}
+            chartType={widget.config.chartType}
+            colorScheme={widget.config.colorScheme}
+            showLegend={widget.config.showLegend}
             height={widget.config.height}
           />
         );

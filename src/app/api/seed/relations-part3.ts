@@ -1,40 +1,40 @@
 // Parte 3: Relações de projetos, produtos e indicadores
 
 export const relationsPartThree = async (runQuery: Function) => {
-  // Relações entre Projetos e Departamentos
+  // Relações entre Projetos e Unidades
   await runQuery(`
     MATCH (pr:Projeto {name: "Modernização ERP"})
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
   await runQuery(`
     MATCH (pr:Projeto {name: "Nova Identidade Visual"})
-    MATCH (d:Departamento {name: "Marketing"})
+    MATCH (d:Unidade {name: "Marketing"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
   await runQuery(`
     MATCH (pr:Projeto {name: "Expansão Nordeste"})
-    MATCH (d:Departamento {name: "Comercial"})
+    MATCH (d:Unidade {name: "Comercial"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
   await runQuery(`
     MATCH (pr:Projeto {name: "Certificação ISO 27001"})
-    MATCH (d:Departamento {name: "Tecnologia da Informação"})
+    MATCH (d:Unidade {name: "Tecnologia da Informação"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
   await runQuery(`
     MATCH (pr:Projeto {name: "Redução de Custos"})
-    MATCH (d:Departamento {name: "Financeiro"})
+    MATCH (d:Unidade {name: "Financeiro"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
   await runQuery(`
     MATCH (pr:Projeto {name: "Lançamento Produto X"})
-    MATCH (d:Departamento {name: "Pesquisa e Desenvolvimento"})
+    MATCH (d:Unidade {name: "Pesquisa e Desenvolvimento"})
     CREATE (d)-[:GERENCIA]->(pr)
   `);
 
@@ -222,16 +222,16 @@ export const relationsPartThree = async (runQuery: Function) => {
     CREATE (prod)-[:VENDIDO_EM]->(merc)
   `);
 
-  // Relações entre Produtos e Departamentos responsáveis
+  // Relações entre Produtos e Unidades responsáveis
   await runQuery(`
     MATCH (prod:Produto)
-    MATCH (d:Departamento {name: "Pesquisa e Desenvolvimento"})
+    MATCH (d:Unidade {name: "Pesquisa e Desenvolvimento"})
     CREATE (d)-[:DESENVOLVE]->(prod)
   `);
 
   await runQuery(`
     MATCH (prod:Produto)
-    MATCH (d:Departamento {name: "Comercial"})
+    MATCH (d:Unidade {name: "Comercial"})
     CREATE (d)-[:COMERCIALIZA]->(prod)
   `);
 
