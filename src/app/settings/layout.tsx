@@ -1,18 +1,27 @@
+"use client";
+
 import { Metadata } from "next";
 import { Separator } from "@/components/ui/separator";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { SideNavItem } from "../../components/side-nav-item";
-
-export const metadata: Metadata = {
-  title: "Configurações | Frigg",
-  description: "Gerencie as configurações do sistema Frigg.",
-};
+import { useAuth } from "@/contexts/auth-context";
 
 interface SettingsLayoutProps {
   children: React.ReactNode;
 }
 
+export const metadata: Metadata = {
+  title: "Configurações",
+  description: "Gerencie as configurações da sua conta e do sistema.",
+};
+
 export default function SettingsLayout({ children }: SettingsLayoutProps) {
+  const pathname = usePathname();
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.roles.includes('admin');
+  
   return (
     <div className="container max-w-screen-xl mx-auto py-6 space-y-6">
       <div className="space-y-0.5">
@@ -39,9 +48,23 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
             <SideNavItem href="/settings/database">
               Banco de Dados
             </SideNavItem>
-            <SideNavItem href="/settings/admin">
-              Admin
-            </SideNavItem>
+            
+            {/* Only show admin options to admin users */}
+            {isAdmin && (
+              <>
+                <div className="pt-4 mt-4 border-t border-border">
+                  <h3 className="mb-2 font-medium text-muted-foreground">Administração</h3>
+                  <div className="space-y-2">
+                    <SideNavItem href="/settings/admin">
+                      Admin
+                    </SideNavItem>
+                    <SideNavItem href="/settings/admin/node-permissions">
+                      Visibilidade de Nós
+                    </SideNavItem>
+                  </div>
+                </div>
+              </>
+            )}
           </nav>
         </aside>
         <div className="flex-1 md:max-w-3xl">

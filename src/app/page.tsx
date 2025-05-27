@@ -13,6 +13,7 @@ import {
 import Image from "next/image";
 import LottieWaves from "@/components/lottie-animation";
 import { useOrgConfig } from "@/contexts/org-config-provider";
+import { UserPermissionDisplay } from "@/components/user-permission-display";
 
 export default function Home() {
   const { config } = useOrgConfig();
@@ -21,6 +22,11 @@ export default function Home() {
     <div className="flex flex-col min-h-screen">
       {/* Hero Section */}
       <main className="flex-grow flex flex-col items-center justify-center px-6 py-16 md:py-24 bg-gradient-to-br from-blue-950 via-indigo-950 to-violet-900 dark:from-background dark:via-gray-900 dark:to-blue-950 relative overflow-hidden">
+        {/* User Permissions Testing Display */}
+        <div className="absolute top-4 right-4 max-w-sm w-full z-20">
+          <UserPermissionDisplay />
+        </div>
+
         {/* Blue waves animation - positioned higher in the hero */}
         <div className="absolute inset-0 w-full h-full z-0 flex items-center">
           <div className="w-full transform -translate-y-55">

@@ -4,11 +4,10 @@ import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Waypoints, Menu } from "lucide-react";
 
 import ThemeToggle from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
 import { ConnectionStatus } from "@/components/ui/ConnectionStatus";
+import { UserSwitcher } from "@/components/user-switcher";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -17,15 +16,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useTheme } from "./theme-provider";
 import { useOrgConfig } from "@/contexts/org-config-provider";
@@ -136,40 +126,7 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
         <div className="flex items-center gap-3">
           <ConnectionStatus />
           <ThemeToggle />
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 rounded-full p-0">
-                <Avatar className="h-7 w-7">
-                  <AvatarImage src="/avatars/user.png" alt="User" />
-                  <AvatarFallback>AC</AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{config?.shortName || "FIEAC"}</p>
-                  <p className="text-xs leading-none text-muted-foreground">
-                    {config?.contactEmail || "usuario@fieac.org.br"}
-                  </p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <Link href="/perfil" className="w-full">
-                  Perfil
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Link href="/settings" className="w-full">
-                  Configurações
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Sair</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <UserSwitcher />
         </div>
       </div>
     </header>

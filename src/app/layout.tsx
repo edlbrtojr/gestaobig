@@ -5,6 +5,7 @@ import { OrgConfigProvider } from "@/components/org-config-provider";
 import { BodyContent } from "@/components/body-content";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
+import { AuthProvider } from "@/contexts/auth-context";
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -55,10 +56,12 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <OrgConfigProvider>
-            <BodyContent>
-              {children}
-            </BodyContent>
-            <Toaster richColors closeButton position="top-right" />
+            <AuthProvider>
+              <BodyContent>
+                {children}
+              </BodyContent>
+              <Toaster richColors closeButton position="top-right" />
+            </AuthProvider>
           </OrgConfigProvider>
         </ThemeProvider>
       </body>

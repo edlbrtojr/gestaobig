@@ -15,6 +15,7 @@ import {
   Compass,
 } from "lucide-react";
 import Image from "next/image";
+import { fetchGraphDataWithPermissions } from "@/lib/graph-with-permissions";
 
 // Utility function to get node color based on node type
 const getNodeColor = (nodeType: string): string => {
@@ -675,4 +676,14 @@ export default function GraphPage() {
       )}
     </div>
   );
+}
+
+export async function getGraphData() {
+  try {
+    // Use the permissions-aware version that filters based on user role
+    return await fetchGraphDataWithPermissions();
+  } catch (error) {
+    console.error("Error fetching graph data:", error);
+    return { nodes: [], relationships: [] };
+  }
 }

@@ -12,6 +12,7 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 - Interface responsiva e moderna
 - Manipulação dinâmica de nós e relações
 - Registro e manutenção de estratégias organizacionais
+- Sistema de permissões com usuários de teste para testar diferentes níveis de acesso
 
 ## Tecnologias
 
@@ -64,6 +65,27 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 
 6. Acesse `http://localhost:3000` e clique em "Gerar Dados de Exemplo" para popular o banco com dados de demonstração
 
+### Configuração de Usuários de Teste (Opcional)
+
+Para testar a aplicação com diferentes níveis de privilégios:
+
+1. Execute o script de criação de usuários de teste:
+
+   ```powershell
+   # No Windows (PowerShell)
+   .\scripts\setup-test-users.ps1
+   ```
+
+   Este script criará 5 usuários diferentes com diferentes níveis de permissão:
+   
+   - **admin_user**: Administrador com acesso total
+   - **editor_user**: Editor que pode modificar dados mas não gerenciar usuários
+   - **analyst_user**: Analista com acesso de leitura e publicação
+   - **reader_user**: Leitor com acesso somente leitura
+   - **limited_user**: Usuário com acesso muito limitado
+
+2. Após a criação, você pode alternar entre esses usuários usando o seletor de usuários no canto superior direito da aplicação
+
 ## Uso
 
 - **Visualização do Grafo**: A tela principal mostra o grafo de relacionamentos
@@ -73,6 +95,57 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 - **Tema**: Alterne entre modo claro e escuro com o botão no topo
 - **Adição de Entidades**: Adicione novas entidades através do formulário específico
 - **Criação de Relações**: Conecte entidades existentes através da interface de relações
+- **Teste de Privilégios**: Alterne entre diferentes usuários no seletor no cabeçalho para testar níveis de acesso
+
+## Usuários e Privilégios
+
+O sistema inclui 5 tipos de usuários para testar diferentes níveis de acesso:
+
+| Usuário | Papel | Descrição | Permissões |
+|---------|------|-----------|------------|
+| admin_user | Administrador | Acesso total ao sistema | Criar usuários, gerenciar configurações, editar dados, ler dados, publicar relatórios, gerenciar papéis |
+| editor_user | Editor | Pode modificar dados | Editar dados, ler dados |
+| analyst_user | Analista | Acesso de leitura e publicação | Ler dados, publicar relatórios |
+| reader_user | Leitor | Acesso somente leitura | Ler dados |
+| limited_user | Acesso Limitado | Acesso muito restrito | Acesso restrito a dados específicos |
+
+## Gerenciamento de Visibilidade de Nós
+
+O sistema inclui um recurso avançado de gerenciamento de visibilidade de nós que permite controlar quais usuários podem ver quais nós no grafo:
+
+### Características
+
+- **Visibilidade Restrita**: Limite quais nós cada perfil de usuário pode visualizar
+- **Propagação de Visibilidade**: Se um nó é oculto, suas conexões também são automaticamente ocultas
+- **Operações em Massa**: Conceda ou revogue acesso a múltiplos nós de uma só vez
+- **Filtros Avançados**: Filtre nós por tipo, visibilidade e mais para gerenciamento facilitado
+
+### Como Utilizar
+
+1. Acesse as **Configurações** > **Administração** > **Visibilidade de Nós**
+2. Use os filtros para encontrar os nós que deseja configurar
+3. Selecione os nós e aplique uma das seguintes operações:
+   - **Restringir Visibilidade**: Torna nós visíveis apenas para funções específicas
+   - **Tornar Público**: Torna nós visíveis para todos os usuários
+   - **Conceder Acesso**: Concede permissão para funções específicas verem nós restritos
+   - **Revogar Acesso**: Remove permissão para funções específicas verem nós restritos
+
+### Impacto na Visualização
+
+- Usuários só verão os nós aos quais têm acesso explícito
+- Relacionamentos entre nós ocultos e visíveis são automaticamente filtrados
+- Administradores mantêm visibilidade completa de todos os nós
+
+### Configuração Inicial
+
+Execute o script de configuração para preparar o esquema de permissões:
+
+```powershell
+# No Windows (PowerShell)
+.\scripts\setup-permissions.ps1
+```
+
+Este script criará as estruturas de dados necessárias para gerenciar permissões de nós.
 
 ## Documentação
 
