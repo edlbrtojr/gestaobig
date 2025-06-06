@@ -38,7 +38,7 @@ interface NodeTypesConfig {
 }
 
 interface NodeFormData {
-  name: string;
+  nome: string;
   label: string;
   properties: { [key: string]: string };
 }
@@ -69,13 +69,43 @@ const getUniqueNodeId = (nodeId: any): string => {
   return JSON.stringify(nodeId);
 };
 
+// Map node types to human-readable labels
+const getNodeTypeLabel = (type: string): string => {
+  const labelMap: Record<string, string> = {
+    'Empresa': 'Empresa',
+    'Unidade': 'Unidade',
+    'Missao': 'Missão',
+    'Visao': 'Visão',
+    'Proposito': 'Propósito',
+    'Negocio': 'Negócio',
+    'SistemaApoio': 'Sistema de Apoio'
+  };
+  
+  return labelMap[type] || type;
+};
+
+// Map relationship types to human-readable labels
+const getRelationshipTypeLabel = (type: string): string => {
+  const labelMap: Record<string, string> = {
+    'POSSUI': 'Possui',
+    'TEM_PROPOSITO': 'Tem propósito',
+    'TEM_MISSAO': 'Tem missão',
+    'TEM_VISAO': 'Tem visão',
+    'INCLUI': 'Inclui',
+    'PRESTA_SERVICO_PARA': 'Presta serviço para',
+    'ATUA_EM': 'Atua em'
+  };
+  
+  return labelMap[type] || type;
+};
+
 export default function AddForm({ onAdd }: AddFormProps) {
   const router = useRouter();
   const [formType, setFormType] = useState<"node" | "relationship">("node");
   const [nodeTypesConfig, setNodeTypesConfig] = useState<NodeTypesConfig>({});
   const [selectedNodeType, setSelectedNodeType] = useState<string>("");
   const [nodeFormData, setNodeFormData] = useState<NodeFormData>({
-    name: "",
+    nome: "",
     label: "",
     properties: {},
   });
@@ -94,7 +124,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
       properties: {},
     });
   const [existingNodes, setExistingNodes] = useState<
-    { id: string; name: string; label: string; properties: any }[]
+    { id: string; nome: string; label: string; properties: any }[]
   >([]);
   const [relationshipTypes, setRelationshipTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -123,7 +153,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
           const firstNodeType = Object.keys(config)[0];
           setSelectedNodeType(firstNodeType);
           setNodeFormData({
-            name: "",
+            nome: "",
             label: firstNodeType,
             properties: { ...config[firstNodeType].properties },
           });
@@ -150,7 +180,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
           const firstNodeType = Object.keys(config)[0];
           setSelectedNodeType(firstNodeType);
           setNodeFormData({
-            name: "",
+            nome: "",
             label: firstNodeType,
             properties: { ...config[firstNodeType].properties },
           });
@@ -248,7 +278,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
       const normalizedNodes = data.nodes.map((node: any) => ({
         ...node,
         id: getUniqueNodeId(node.id), // Convert Neo4j ID to string for consistent comparison
-        name: node.properties?.name || `Node ${getUniqueNodeId(node.id)}`, // Ensure name is extracted from properties
+        nome: node.properties?.nome || node.properties?.name || `Nó ${getUniqueNodeId(node.id)}`, // Ensure nome is extracted from properties
       }));
 
       setExistingNodes(normalizedNodes);
@@ -295,7 +325,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
 
     try {
       // Validate inputs
-      if (!nodeFormData.name.trim()) {
+      if (!nodeFormData.nome.trim()) {
         setError("Nome do nó é obrigatório");
         setLoading(false);
         return;
@@ -311,12 +341,13 @@ export default function AddForm({ onAdd }: AddFormProps) {
       // Add custom properties
       const finalProperties = {
         ...cleanedProperties,
-        ...customProperties
+        ...customProperties,
+        nome: nodeFormData.nome
       };
 
       // Log submission data for debugging
       console.log("Submitting node:", {
-        name: nodeFormData.name,
+        nome: nodeFormData.nome,
         label: nodeFormData.label,
         properties: finalProperties,
       });
@@ -327,7 +358,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: nodeFormData.name,
+          nome: nodeFormData.nome,
           label: nodeFormData.label,
           properties: finalProperties,
         }),
@@ -369,7 +400,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
 
       // Reset node form (even though we are switching, it's good practice)
       setNodeFormData({
-        name: "",
+        nome: "",
         label: selectedNodeType,
         properties: { ...nodeTypesConfig[selectedNodeType].properties },
       });
@@ -467,21 +498,21 @@ export default function AddForm({ onAdd }: AddFormProps) {
         if (propDef.type === 'date') return 'date';
         if (propDef.type === 'enum') return 'select';
         if (propDef.type === 'boolean') return 'checkbox';
-        if (propDef.type === 'string' && propertyName === 'description') return 'textarea';
+        if (propDef.type === 'string' && propertyName === 'descricao') return 'textarea';
         return 'text';
       }
       
       // Fallback logic for custom properties
       if (
-        propertyName.includes("date") ||
-        propertyName === "startDate" ||
-        propertyName === "endDate" ||
-        propertyName === "deadline"
+        propertyName.includes("data") ||
+        propertyName === "dataInicio" ||
+        propertyName === "dataFim" ||
+        propertyName === "prazo"
       ) {
         return "date";
       }
 
-      if (propertyName === "description") {
+      if (propertyName === "descricao") {
         return "textarea";
       }
     } catch (error) {
@@ -504,8 +535,8 @@ export default function AddForm({ onAdd }: AddFormProps) {
   // Convert existingNodes to ComboboxOption format
   const nodeOptions: ComboboxOption[] = existingNodes.map((node) => ({
     value: node.id,
-    label: node.name,
-    description: node.label,
+    label: node.nome || node.properties?.nome || node.properties?.name || `Nó ${node.id}`,
+    description: getNodeTypeLabel(node.label),
   }));
 
   // Filter target nodes to exclude the selected source node
@@ -517,12 +548,29 @@ export default function AddForm({ onAdd }: AddFormProps) {
   const relationshipTypeOptions: ComboboxOption[] = relationshipTypes.map(
     (type) => ({
       value: type,
-      label: type,
+      label: getRelationshipTypeLabel(type),
     })
   );
 
   // Get all node types for dropdown
   const nodeTypeOptions = Object.keys(nodeTypesConfig);
+  
+  // Helper function to translate property names to human-readable labels
+  const getPropertyLabel = (name: string): string => {
+    const labelMap: Record<string, string> = {
+      'nome': 'Nome',
+      'descricao': 'Descrição',
+      'data': 'Data',
+      'status': 'Status',
+      'prioridade': 'Prioridade',
+      'responsavel': 'Responsável',
+      'setor': 'Setor',
+      'area': 'Área',
+      'objetivo': 'Objetivo'
+    };
+    
+    return labelMap[name] || name.replace(/_/g, " ");
+  };
 
   return (
     <div className="w-full p-6 relative">
@@ -603,7 +651,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                     setSelectedNodeType(selectedType);
                     // Reset the form data when the node type changes
                     setNodeFormData({
-                      name: "",
+                      nome: "",
                       label: selectedType,
                       properties: {
                         ...nodeTypesConfig[selectedType]?.properties || {},
@@ -614,7 +662,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                 >
                   {nodeTypeOptions.map((type) => (
                     <option key={type} value={type}>
-                      {type}
+                      {getNodeTypeLabel(type)}
                     </option>
                   ))}
                 </select>
@@ -626,9 +674,9 @@ export default function AddForm({ onAdd }: AddFormProps) {
                 </label>
                 <input
                   type="text"
-                  value={nodeFormData.name}
+                  value={nodeFormData.nome}
                   onChange={(e) =>
-                    setNodeFormData({ ...nodeFormData, name: e.target.value })
+                    setNodeFormData({ ...nodeFormData, nome: e.target.value })
                   }
                   placeholder="Nome do nó"
                   className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
@@ -646,7 +694,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                 {Object.entries(nodeFormData.properties).map(([key, value]) => (
                   <div key={key} className="space-y-1">
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 capitalize">
-                      {key}
+                      {getPropertyLabel(key)}
                     </label>
                     {!inputTypes[key] ? (
                       // Show loading state or fallback while input type is being determined
@@ -656,7 +704,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         onChange={(e) =>
                           handlePropertyChange(key, e.target.value)
                         }
-                        placeholder={`${key}`}
+                        placeholder={`${getPropertyLabel(key)}`}
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                       />
                     ) : inputTypes[key] === "textarea" ? (
@@ -665,7 +713,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         onChange={(e) =>
                           handlePropertyChange(key, e.target.value)
                         }
-                        placeholder={`${key}`}
+                        placeholder={`${getPropertyLabel(key)}`}
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                         rows={3}
                       />
@@ -677,6 +725,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         }
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                       >
+                        <option value="">Selecione...</option>
                         {selectOptions[key]?.map((option) => (
                           <option key={option} value={option}>
                             {option}
@@ -692,6 +741,20 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         }
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                       />
+                    ) : inputTypes[key] === "checkbox" ? (
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          checked={value === 'true' || Boolean(value)}
+                          onChange={(e) =>
+                            handlePropertyChange(key, e.target.checked.toString())
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          {value === 'true' || Boolean(value) ? 'Sim' : 'Não'}
+                        </span>
+                      </div>
                     ) : (
                       <input
                         type="text"
@@ -699,7 +762,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                         onChange={(e) =>
                           handlePropertyChange(key, e.target.value)
                         }
-                        placeholder={`${key}`}
+                        placeholder={`${getPropertyLabel(key)}`}
                         className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-700 focus:border-transparent"
                       />
                     )}
@@ -772,7 +835,7 @@ export default function AddForm({ onAdd }: AddFormProps) {
                   <div key={key} className="relative">
                     <div className="flex items-center space-x-1">
                       <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 capitalize">
-                        {key}
+                        {getPropertyLabel(key)}
                       </label>
                       <button
                         type="button"

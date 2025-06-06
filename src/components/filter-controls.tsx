@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Node, Relationship } from "@/types/graph";
 import { getGraphSchema } from "@/lib/schema";
+import { fetchCompanies, fetchUnits, fetchNodeTypes, fetchConnectionsRange, fetchGraphData } from "@/lib/filter-data";
+import { resetConnectionError } from "@/lib/neo4j";
 
 interface FilterControlsProps {
   onFilterChange: (filters: FilterState) => void;
@@ -16,7 +18,23 @@ export interface FilterState {
   connectionsRange: [number, number];
   showIsolatedNodes: boolean;
   company: string;
+  unit: string; // New unit filter
 }
+
+// Add helper function to translate node type labels
+const getNodeTypeLabel = (type: string): string => {
+  const labelMap: Record<string, string> = {
+    'Empresa': 'Empresa',
+    'Unidade': 'Unidade',
+    'Missao': 'Missão',
+    'Visao': 'Visão', 
+    'Proposito': 'Propósito',
+    'Negocio': 'Negócio',
+    'SistemaApoio': 'Sistema de Apoio'
+  };
+  
+  return labelMap[type] || type;
+};
 
 export default function FilterControls({
   onFilterChange,
@@ -35,12 +53,26 @@ export default function FilterControls({
   // State for node types and their colors from schema
   const [nodeTypesConfig, setNodeTypesConfig] = useState<Record<string, { color: string }>>({});
   const [isLoadingSchema, setIsLoadingSchema] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // State para os dados dos filtros carregados do banco de dados
+  const [availableCompanies, setAvailableCompanies] = useState<string[]>(["SISTEMA FIEAC"]);
+  const [availableUnits, setAvailableUnits] = useState<string[]>(["Todas"]);
+  const [connectionsRange, setConnectionsRange] = useState<[number, number]>([0, 0]);
+  const [isLoadingFilterData, setIsLoadingFilterData] = useState(true);
+  
+  // Estado para controlar erros de conexão
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  
+  // State para os dados do grafo carregados do banco de dados
+  const [graphData, setGraphData] = useState<{ nodes: Node[], relationships: Relationship[] }>({ nodes: [], relationships: [] });
 
   // Load node types from schema
   useEffect(() => {
     const loadNodeTypes = async () => {
       try {
         setIsLoadingSchema(true);
+        setError(null);
         const schema = await getGraphSchema();
         const nodeTypesFromSchema: Record<string, { color: string }> = {};
         
@@ -54,6 +86,7 @@ export default function FilterControls({
         setNodeTypesConfig(nodeTypesFromSchema);
       } catch (error) {
         console.error("Failed to load node types from schema:", error);
+        setError("Failed to load node types. Please try again later.");
         // Fallback to empty object which will be populated from available nodes
       } finally {
         setIsLoadingSchema(false);
@@ -72,46 +105,120 @@ export default function FilterControls({
       window.removeEventListener('schemaUpdated', handleSchemaUpdated);
     };
   }, []);
-
-  // Extract unique companies from nodes
-  const availableCompanies = useMemo(() => {
-    if (!nodes || nodes.length === 0) return ["SISTEMA FIEAC"]; // Default to SISTEMA FIEAC even if no nodes
-
-    const companies = new Set<string>();
-    // Don't add empty option anymore
-
-    nodes.forEach((node) => {
-      if (node.properties && node.properties.company) {
-        // Handle cases where a node belongs to multiple companies (comma-separated)
-        const nodeCompanies = node.properties.company.split(",");
-        nodeCompanies.forEach((company: string) =>
-          companies.add(company.trim())
-        );
+  
+  // Carregar dados dos filtros do banco de dados
+  useEffect(() => {
+    const loadFilterData = async () => {
+      try {
+        setIsLoadingFilterData(true);
+        setConnectionError(null);
+        
+        // Carregar dados em paralelo para melhor performance
+        const [companies, units, range, graphDataResult] = await Promise.all([
+          fetchCompanies(),
+          fetchUnits(),
+          fetchConnectionsRange(),
+          fetchGraphData()
+        ]);
+        
+        // Verificar se os dados retornados são os padrões (indicando falha de conexão)
+        if (
+          companies.length === 1 && companies[0] === "SISTEMA FIEAC" &&
+          units.length === 1 && units[0] === "Todas" &&
+          range[0] === 0 && range[1] === 10 &&
+          graphDataResult.nodes.length === 0
+        ) {
+          setConnectionError("Não foi possível conectar ao banco de dados. Usando valores padrão.");
+        }
+        
+        setAvailableCompanies(companies);
+        setAvailableUnits(units);
+        setConnectionsRange(range);
+        setGraphData(graphDataResult);
+      } catch (error) {
+        console.error("Erro ao carregar dados dos filtros:", error);
+        setConnectionError("Erro ao conectar ao banco de dados. Usando valores padrão.");
+      } finally {
+        setIsLoadingFilterData(false);
       }
-    });
+    };
+    
+    loadFilterData();
+  }, []);
 
-    // Always ensure SISTEMA FIEAC is included
-    companies.add("SISTEMA FIEAC");
-
-    return Array.from(companies).sort();
-  }, [nodes]);
+  // Função para tentar reconectar ao banco de dados
+  const handleRetryConnection = useCallback(() => {
+    resetConnectionError();
+    setConnectionError(null);
+    setIsLoadingFilterData(true);
+    
+    // Recarregar os dados após um pequeno delay
+    setTimeout(() => {
+      const loadFilterData = async () => {
+        try {
+          // Carregar dados em paralelo para melhor performance
+          const [companies, units, range, graphDataResult] = await Promise.all([
+            fetchCompanies(),
+            fetchUnits(),
+            fetchConnectionsRange(),
+            fetchGraphData()
+          ]);
+          
+          setAvailableCompanies(companies);
+          setAvailableUnits(units);
+          setConnectionsRange(range);
+          setGraphData(graphDataResult);
+          
+          if (graphDataResult.nodes.length > 0) {
+            setConnectionError(null);
+          } else {
+            setConnectionError("Não foi possível conectar ao banco de dados. Usando valores padrão.");
+          }
+        } catch (error) {
+          console.error("Erro ao recarregar dados dos filtros:", error);
+          setConnectionError("Erro ao conectar ao banco de dados. Usando valores padrão.");
+        } finally {
+          setIsLoadingFilterData(false);
+        }
+      };
+      
+      loadFilterData();
+    }, 1000);
+  }, []);
 
   // Discover node types from actual nodes if schema doesn't have them
   const discoveredNodeTypes = useMemo(() => {
-    if (!nodes || nodes.length === 0) return {};
+    // Preferir usar os nós do graphData carregado do banco em vez dos nós passados como prop
+    const nodesForDiscovery = graphData.nodes.length > 0 ? graphData.nodes : nodes;
+    
+    if (!nodesForDiscovery || nodesForDiscovery.length === 0) return {};
     
     // Create a combined set of node types from schema and actual nodes
     const combinedNodeTypes: Record<string, { color: string }> = {...nodeTypesConfig};
     
+    // System node types that should never be displayed
+    const systemNodeTypes = ["NodeVisibility", "NodePermission"];
+    
     // Add any node types from the data that aren't in the schema
-    nodes.forEach(node => {
-      if (node.label && !combinedNodeTypes[node.label]) {
+    nodesForDiscovery.forEach(node => {
+      // Skip system node types and nodes with labels starting with underscore
+      if (node.label && 
+          !systemNodeTypes.includes(node.label) && 
+          !node.label.startsWith('_') && 
+          !combinedNodeTypes[node.label]) {
         combinedNodeTypes[node.label] = { color: "#9E9E9E" }; // Default gray
       }
     });
     
+    // Also remove any system node types that might be in the nodeTypesConfig
+    systemNodeTypes.forEach(type => {
+      if (combinedNodeTypes[type]) {
+        delete combinedNodeTypes[type];
+      }
+    });
+    
     return combinedNodeTypes;
-  }, [nodes, nodeTypesConfig]);
+  }, [graphData.nodes, nodes, nodeTypesConfig]);
   
   // Use either schema node types or discovered node types
   const effectiveNodeTypes = useMemo(() => {
@@ -126,15 +233,6 @@ export default function FilterControls({
     }, {} as Record<string, boolean>);
   }, [effectiveNodeTypes]);
 
-  // Find the range of connections - memoized to prevent recalculation on every render
-  const connectionsRange = useMemo((): [number, number] => {
-    if (!nodes || nodes.length === 0) return [0, 0];
-
-    // For simplicity, we'll just use the node count as max range
-    // In a real scenario, we'd count actual relationships
-    return [0, nodes.length > 0 ? nodes.length : 10];
-  }, [nodes]);
-
   // State for filters
   const [filters, setFilters] = useState<FilterState>(() => ({
     search: "",
@@ -142,6 +240,7 @@ export default function FilterControls({
     connectionsRange: connectionsRange,
     showIsolatedNodes: true,
     company: "SISTEMA FIEAC", // Default to SISTEMA FIEAC
+    unit: "Todas", // Default to show all units
   }));
   
   // Update filters when node types change
@@ -153,6 +252,18 @@ export default function FilterControls({
       }));
     }
   }, [defaultNodeTypesFilter]);
+  
+  // Atualizar filtros quando os dados do banco forem carregados
+  useEffect(() => {
+    if (!isLoadingFilterData) {
+      setFilters(prev => ({
+        ...prev,
+        connectionsRange: connectionsRange,
+        company: availableCompanies[0] || "SISTEMA FIEAC",
+        unit: "Todas"
+      }));
+    }
+  }, [isLoadingFilterData, connectionsRange, availableCompanies]);
 
   // Track warning message state
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
@@ -160,7 +271,11 @@ export default function FilterControls({
   // Helper function to check if a filter change would result in no relationships
   const wouldFilterHaveRelationships = useCallback(
     (updatedNodeTypes: Record<string, boolean>): boolean => {
-      if (!relationships || relationships.length === 0) return true;
+      // Preferir usar os relacionamentos do graphData carregado do banco em vez dos relacionamentos passados como prop
+      const relationshipsToCheck = graphData.relationships.length > 0 ? graphData.relationships : relationships;
+      const nodesToCheck = graphData.nodes.length > 0 ? graphData.nodes : nodes;
+      
+      if (!relationshipsToCheck || relationshipsToCheck.length === 0) return true;
 
       // Quick check - if all node types are deselected, there would be no relationships
       if (Object.values(updatedNodeTypes).every((selected) => !selected)) {
@@ -170,7 +285,7 @@ export default function FilterControls({
       // Get the set of node IDs that would be visible with the updated filter
       const visibleNodeIds = new Set<number>();
 
-      nodes.forEach((node) => {
+      nodesToCheck.forEach((node) => {
         if (updatedNodeTypes[node.label]) {
           const nodeId =
             typeof node.id === "object" && node.id !== null
@@ -181,7 +296,7 @@ export default function FilterControls({
       });
 
       // Check if any relationships would be visible with these visible nodes
-      for (const rel of relationships) {
+      for (const rel of relationshipsToCheck) {
         const sourceId =
           typeof rel.source === "object" && rel.source !== null
             ? rel.source.low
@@ -200,21 +315,23 @@ export default function FilterControls({
       // No visible relationships found
       return false;
     },
-    [nodes, relationships]
+    [graphData.nodes, graphData.relationships, nodes, relationships]
   );
 
   // Initialize filters once nodes and relationships are loaded
   useEffect(() => {
     if (initialized.current) return;
 
-    if (nodes.length > 0) {
+    const nodesToCheck = graphData.nodes.length > 0 ? graphData.nodes : nodes;
+    
+    if (nodesToCheck.length > 0) {
       initialized.current = true;
       setFilters((prev) => ({
         ...prev,
         connectionsRange: connectionsRange,
       }));
     }
-  }, [nodes, connectionsRange]);
+  }, [nodes, graphData.nodes, connectionsRange]);
 
   // Debounced filter application function to reduce unnecessary updates
   const applyFilters = useCallback(
@@ -330,10 +447,46 @@ export default function FilterControls({
 
   // Handle company filter change
   const handleCompanyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters((prev) => ({
-      ...prev,
-      company: e.target.value,
-    }));
+    const newCompany = e.target.value;
+    console.log("Company filter changed to:", newCompany);
+    
+    setFilters((prev) => {
+      const updated = {
+        ...prev,
+        company: newCompany,
+      };
+      
+      // Apply the filters immediately without debouncing for dropdown changes
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      onFilterChange(updated);
+      
+      return updated;
+    });
+  };
+
+  // Handle unit filter change
+  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newUnit = e.target.value;
+    console.log("Unit filter changed to:", newUnit);
+    
+    setFilters((prev) => {
+      const updated = {
+        ...prev,
+        unit: newUnit,
+      };
+      
+      // Apply the filters immediately without debouncing for dropdown changes
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      onFilterChange(updated);
+      
+      return updated;
+    });
   };
 
   // Reset filters to default state
@@ -343,16 +496,10 @@ export default function FilterControls({
       nodeTypes: defaultNodeTypesFilter,
       connectionsRange: connectionsRange,
       showIsolatedNodes: true,
-      company: "SISTEMA FIEAC",
+      company: availableCompanies[0] || "SISTEMA FIEAC",
+      unit: "Todas",
     });
   };
-
-  // Apply filters to parent component (actual filtering logic happens in the parent)
-  useEffect(() => {
-    // Only consider company property if the node has one
-    // Special case: SISTEMA FIEAC should show all nodes
-    onFilterChange(filters);
-  }, [filters, onFilterChange]);
 
   return (
     <div className="flex flex-col gap-4 bg-white dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
@@ -365,13 +512,32 @@ export default function FilterControls({
         </p>
       </div>
 
+      {/* Exibir erro de conexão se houver */}
+      {connectionError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+          <div className="flex items-center">
+            <svg className="w-5 h-5 text-red-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <p className="text-sm text-red-700">{connectionError}</p>
+          </div>
+          <button 
+            onClick={handleRetryConnection}
+            className="mt-2 px-3 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+            disabled={isLoadingFilterData}
+          >
+            {isLoadingFilterData ? "Tentando reconectar..." : "Tentar reconectar"}
+          </button>
+        </div>
+      )}
+
       {/* Search Filter */}
       <div className="space-y-1.5">
         <label
           htmlFor="search-filter"
           className="block text-xs font-medium text-gray-700 dark:text-gray-300"
         >
-          Pesquisar por Nome
+          Pesquisar por Nome, Sigla ou Tipo
         </label>
         <div className="relative">
           <input
@@ -399,22 +565,51 @@ export default function FilterControls({
         </div>
       </div>
 
-      {/* Company Filter Dropdown */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">Empresas</h3>
+      {/* Company and Unit Filters (side by side) */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* Company Filter Dropdown */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-foreground">Empresas</h3>
+          </div>
+          {isLoadingFilterData ? (
+            <div className="w-full h-9 bg-gray-100 dark:bg-gray-800 animate-pulse rounded-md"></div>
+          ) : (
+            <select
+              className="w-full rounded-md border bg-background border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              value={filters.company}
+              onChange={handleCompanyChange}
+            >
+              {availableCompanies.map((company) => (
+                <option key={company} value={company}>
+                  {company}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-        <select
-          className="w-full rounded-md border bg-background border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          value={filters.company}
-          onChange={handleCompanyChange}
-        >
-          {availableCompanies.map((company) => (
-            <option key={company} value={company}>
-              {company}
-            </option>
-          ))}
-        </select>
+
+        {/* Unit Filter Dropdown */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-foreground">Unidades</h3>
+          </div>
+          {isLoadingFilterData ? (
+            <div className="w-full h-9 bg-gray-100 dark:bg-gray-800 animate-pulse rounded-md"></div>
+          ) : (
+            <select
+              className="w-full rounded-md border bg-background border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              value={filters.unit}
+              onChange={handleUnitChange}
+            >
+              {availableUnits.map((unit) => (
+                <option key={unit} value={unit}>
+                  {unit}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Node Types Filter */}
@@ -446,34 +641,44 @@ export default function FilterControls({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2 max-h-[240px] overflow-y-auto pr-1 py-1">
-          {Object.keys(filters.nodeTypes)
-            .sort()
-            .map((type) => (
-              <div key={type} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id={`node-type-${type}`}
-                  checked={filters.nodeTypes[type]}
-                  onChange={() => toggleNodeTypeFilter(type)}
-                  className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-1 focus:ring-blue-500/30 focus:ring-offset-0"
-                />
-                <label
-                  htmlFor={`node-type-${type}`}
-                  className="text-xs text-gray-800 dark:text-gray-200 flex items-center gap-1.5"
-                >
-                  <span
-                    className="inline-block w-3 h-3 rounded-full"
-                    style={{
-                      backgroundColor:
-                        effectiveNodeTypes[type]?.color || "#9E9E9E",
-                    }}
-                  ></span>
-                  {type}
-                </label>
-              </div>
-            ))}
-        </div>
+        {error ? (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-md text-xs text-red-800 dark:bg-red-900/20 dark:border-red-800/30 dark:text-red-300">
+            {error}
+          </div>
+        ) : isLoadingSchema ? (
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-800 dark:bg-gray-900/20 dark:border-gray-800/30 dark:text-gray-300">
+            Carregando tipos de nós...
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 max-h-[240px] overflow-y-auto pr-1 py-1">
+            {Object.keys(filters.nodeTypes)
+              .sort()
+              .map((type) => (
+                <div key={type} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id={`node-type-${type}`}
+                    checked={filters.nodeTypes[type]}
+                    onChange={() => toggleNodeTypeFilter(type)}
+                    className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-1 focus:ring-blue-500/30 focus:ring-offset-0"
+                  />
+                  <label
+                    htmlFor={`node-type-${type}`}
+                    className="text-xs text-gray-800 dark:text-gray-200 flex items-center gap-1.5"
+                  >
+                    <span
+                      className="inline-block w-3 h-3 rounded-full"
+                      style={{
+                        backgroundColor:
+                          effectiveNodeTypes[type]?.color || "#9E9E9E",
+                      }}
+                    ></span>
+                    {getNodeTypeLabel(type)}
+                  </label>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Divider */}

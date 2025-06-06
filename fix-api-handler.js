@@ -106,3 +106,83 @@
     console.error('Error testing API:', error);
   }
 })(); 
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Diretório base para arquivos da API
+const API_DIR = path.join(process.cwd(), 'src', 'app', 'api');
+const SCRIPTS_DIR = path.join(process.cwd(), 'scripts');
+
+// Padrão para encontrar a inicialização do driver sem autenticação
+const OLD_DRIVER_PATTERN_1 = /const\s+driver\s*=\s*neo4j\.driver\(\s*process\.env\.NEO4J_URI\s*\|\|\s*"bolt:\/\/localhost:7687"\s*\);/g;
+const OLD_DRIVER_PATTERN_2 = /const\s+driver\s*=\s*neo4j\.driver\(\s*process\.env\.NEO4J_URI\s*\|\|\s*"bolt:\/\/localhost:7687"\s*,\s*process\.env\.NEO4J_USER\s*&&\s*process\.env\.NEO4J_PASSWORD\s*\?\s*neo4j\.auth\.basic\(process\.env\.NEO4J_USER,\s*process\.env\.NEO4J_PASSWORD\)\s*:\s*undefined\s*\);/g;
+
+// Novo código para substituir
+const NEW_DRIVER_CODE = `// Neo4j connection
+const uri = process.env.NEO4J_URI || "bolt://localhost:7687";
+const user = process.env.NEO4J_USER || "neo4j";
+const password = process.env.NEO4J_PASSWORD || "";
+const driver = neo4j.driver(uri, neo4j.auth.basic(user, password));`;
+
+// Função para processar um arquivo
+function processFile(filePath) {
+  console.log(`Processando arquivo: ${filePath}`);
+  
+  try {
+    // Ler o conteúdo do arquivo
+    let content = fs.readFileSync(filePath, 'utf8');
+    
+    // Verificar se o arquivo contém inicialização do driver Neo4j
+    const hasOldPattern1 = OLD_DRIVER_PATTERN_1.test(content);
+    // Resetar o RegExp para a próxima verificação
+    OLD_DRIVER_PATTERN_1.lastIndex = 0;
+    
+    const hasOldPattern2 = OLD_DRIVER_PATTERN_2.test(content);
+    // Resetar o RegExp para a próxima verificação
+    OLD_DRIVER_PATTERN_2.lastIndex = 0;
+    
+    if (hasOldPattern1) {
+      console.log(`  - Encontrado padrão 1 no arquivo ${filePath}`);
+      content = content.replace(OLD_DRIVER_PATTERN_1, NEW_DRIVER_CODE);
+      fs.writeFileSync(filePath, content, 'utf8');
+      console.log(`  - Arquivo atualizado: ${filePath}`);
+    } else if (hasOldPattern2) {
+      console.log(`  - Encontrado padrão 2 no arquivo ${filePath}`);
+      content = content.replace(OLD_DRIVER_PATTERN_2, NEW_DRIVER_CODE);
+      fs.writeFileSync(filePath, content, 'utf8');
+      console.log(`  - Arquivo atualizado: ${filePath}`);
+    } else {
+      console.log(`  - Nenhum padrão encontrado no arquivo ${filePath}`);
+    }
+  } catch (error) {
+    console.error(`Erro ao processar o arquivo ${filePath}:`, error);
+  }
+}
+
+// Função para percorrer diretórios recursivamente
+function processDirectory(dir) {
+  const files = fs.readdirSync(dir);
+  
+  for (const file of files) {
+    const filePath = path.join(dir, file);
+    const stat = fs.statSync(filePath);
+    
+    if (stat.isDirectory()) {
+      processDirectory(filePath);
+    } else if (stat.isFile() && (filePath.endsWith('.ts') || filePath.endsWith('.js'))) {
+      processFile(filePath);
+    }
+  }
+}
+
+// Iniciar o processamento
+console.log('Iniciando atualização dos arquivos de API...');
+processDirectory(API_DIR);
+processDirectory(SCRIPTS_DIR);
+console.log('Processo concluído!');
+
+// Instruções finais
+console.log('\nPara verificar se todos os arquivos foram atualizados corretamente, execute:');
+console.log('grep -r "neo4j\\.driver(" src/app/api'); 

@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     // Try different connection parameters if needed
     const NEO4J_URI = process.env.NEO4J_URI || "bolt://localhost:7687";
     const NEO4J_USER = process.env.NEO4J_USER || "neo4j";
-    const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || "3d1Jun1or";
+    const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || "";
 
     console.log("Connecting to Neo4j:", { NEO4J_URI, NEO4J_USER });
 

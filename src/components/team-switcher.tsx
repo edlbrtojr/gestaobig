@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, Plus } from "lucide-react"
+import { ChevronsUpDown, Plus, AlertCircle } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -20,16 +20,38 @@ import {
 } from "@/components/ui/sidebar"
 
 export function TeamSwitcher({
-  teams,
+  teams = [],
 }: {
-  teams: {
+  teams?: {
     name: string
     logo: React.ElementType
     plan: string
   }[]
 }) {
   const { isMobile } = useSidebar()
-  const [activeTeam, setActiveTeam] = React.useState(teams[0])
+  const [activeTeam, setActiveTeam] = React.useState(teams.length > 0 ? teams[0] : null)
+
+  // Handle no teams available
+  if (!teams.length) {
+    return (
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            size="lg"
+            className="bg-sidebar-muted text-sidebar-muted-foreground"
+          >
+            <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
+              <AlertCircle className="size-4" />
+            </div>
+            <div className="grid flex-1 text-left text-sm leading-tight">
+              <span className="truncate font-medium">No Teams</span>
+              <span className="truncate text-xs">Create a team to get started</span>
+            </div>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    )
+  }
 
   if (!activeTeam) {
     return null

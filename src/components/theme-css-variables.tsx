@@ -1,9 +1,10 @@
 "use client";
 
 import { OrganizationConfig } from "@/app/api/config/route";
+import { siteConfig } from "@/config/site";
 
 interface ThemeCSSVariablesProps {
-  orgConfig: OrganizationConfig | null;
+  orgConfig: OrganizationConfig | null | typeof siteConfig;
 }
 
 export function ThemeCSSVariables({ orgConfig }: ThemeCSSVariablesProps) {

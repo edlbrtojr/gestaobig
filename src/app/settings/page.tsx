@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 export default function GeneralSettingsPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h3 className="text-lg font-medium">Configurações Gerais</h3>
         <p className="text-sm text-muted-foreground">
@@ -18,7 +18,7 @@ export default function GeneralSettingsPage() {
       
       <Separator />
       
-      <div className="space-y-4">
+      <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
           Configurações gerais serão adicionadas aqui.
         </p>

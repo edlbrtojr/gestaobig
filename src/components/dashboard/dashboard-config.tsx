@@ -745,26 +745,23 @@ export function DashboardConfig({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="topResults">Limite de Resultados</Label>
+              <Label htmlFor="topResults">Resultados Principais</Label>
               <Input
                 id="topResults"
                 type="number"
                 min="1"
-                step="1"
-                value={newWidget.config?.topResults || "10"}
-                onChange={(e) => {
-                  // Parse as integer and ensure it's a positive number
-                  const value = parseInt(e.target.value);
-                  const safeValue = isNaN(value) || value < 1 ? 10 : Math.floor(value);
-                  
+                step="1" 
+                value={newWidget.config?.topResults || 10}
+                onChange={(e) =>
                   setNewWidget((prev) => ({
                     ...prev,
                     config: {
                       ...prev.config,
-                      topResults: safeValue,
+                      topResults: parseInt(e.target.value, 10) || 10,
                     },
                   }))
-                }}
+                }
+                placeholder="Número de resultados (10 padrão)"
               />
             </div>
 

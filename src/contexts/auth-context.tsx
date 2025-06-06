@@ -1,161 +1,185 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { 
+  signIn as nextAuthSignIn, 
+  signOut as nextAuthSignOut,
+  useSession 
+} from "next-auth/react";
+import { useRouter, usePathname } from "next/navigation";
+import { toast } from "sonner";
 
-// Define the types for User and role
-export interface User {
-  username: string;
-  displayName: string;
-  description: string;
-  roles: string[];
-}
-
+// Tipos
 interface AuthContextType {
-  currentUser: User | null;
+  user: any;
+  isAuthenticated: boolean;
   isLoading: boolean;
-  error: string | null;
-  login: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
-  switchUser: (user: User) => void;
-  availableTestUsers: User[];
+  isSystemAdmin: boolean;
+  authType: string | null;
+  login: (email: string, password: string) => Promise<boolean>;
+  loginWithMicrosoft: () => Promise<boolean>;
+  register: (name: string, email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
 }
 
-const defaultTestUsers: User[] = [
-  {
-    username: 'admin_user',
-    displayName: 'Administrator',
-    description: 'Full admin privileges with read/write access to all data',
-    roles: ['admin']
-  },
-  {
-    username: 'editor_user',
-    displayName: 'Editor',
-    description: 'Can create and modify data but cannot manage users',
-    roles: ['editor']
-  },
-  {
-    username: 'analyst_user',
-    displayName: 'Analyst',
-    description: 'Can read all data and publish specific reports',
-    roles: ['reader', 'publisher']
-  },
-  {
-    username: 'reader_user',
-    displayName: 'Reader',
-    description: 'Read-only access to all data',
-    roles: ['reader']
-  },
-  {
-    username: 'limited_user',
-    displayName: 'Limited Access',
-    description: 'Very limited access to specific data only',
-    roles: ['limited']
-  }
-];
+// Criar contexto com valor padrão
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+  isSystemAdmin: false,
+  authType: null,
+  login: async () => false,
+  loginWithMicrosoft: async () => false,
+  register: async () => false,
+  logout: async () => {},
+});
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
+// Provider do contexto
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [availableTestUsers, setAvailableTestUsers] = useState<User[]>(defaultTestUsers);
+  const { data: session, status } = useSession();
+  const [user, setUser] = useState<any>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isSystemAdmin, setIsSystemAdmin] = useState<boolean>(false);
+  const [authType, setAuthType] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
 
-  // Check for saved user on initial load
+  // Atualizar estado quando a sessão mudar
   useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-      try {
-        const parsedUser = JSON.parse(savedUser);
-        setCurrentUser(parsedUser);
-      } catch (e) {
-        console.error('Failed to parse saved user:', e);
-        localStorage.removeItem('currentUser');
-      }
+    if (status === "authenticated" && session?.user) {
+      setUser(session.user);
+      setIsAuthenticated(true);
+      setIsSystemAdmin(!!session.user.isSystemAdmin);
+      setAuthType(session.user.authType || "local");
     } else {
-      // Default to admin user if no saved user
-      setCurrentUser(defaultTestUsers[0]);
-      localStorage.setItem('currentUser', JSON.stringify(defaultTestUsers[0]));
+      setUser(null);
+      setIsAuthenticated(false);
+      setIsSystemAdmin(false);
+      setAuthType(null);
     }
+  }, [session, status]);
 
-    // Load test users if available
-    fetchTestUsers().catch(console.error);
-  }, []);
-
-  // Fetch available test users from the database
-  async function fetchTestUsers() {
-    try {
-      const response = await fetch('/api/test-users');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.users && Array.isArray(data.users)) {
-          setAvailableTestUsers(data.users);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch test users:', error);
-      // Fall back to default test users
-    }
-  }
-
-  // Login functionality
-  const login = async (username: string, password: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // In a real app, you would validate with the server
-      // Here we're just simulating by checking against test users
-      const user = availableTestUsers.find(u => u.username === username);
+  // Redirecionar usuário se não autenticado e tentando acessar página protegida
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      const isPublicPage = pathname === "/" || pathname === "/login" || pathname === "/register" || pathname.startsWith('/api/');
       
-      if (!user) {
-        setError('User not found');
+      if (!isPublicPage) {
+        console.log("Redirecionando usuário não autenticado para login...");
+        router.push("/login");
+      }
+    }
+  }, [status, pathname, router]);
+
+  // Funções de autenticação
+  const login = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const result = await nextAuthSignIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (!result?.ok) {
+        toast.error("Credenciais inválidas");
         return false;
       }
-      
-      // Simulate successful login
-      setCurrentUser(user);
-      localStorage.setItem('currentUser', JSON.stringify(user));
+
+      toast.success("Login realizado com sucesso");
+      router.push("/");
       return true;
     } catch (error) {
-      setError('Login failed');
+      console.error("Erro ao fazer login:", error);
+      toast.error("Erro ao fazer login");
       return false;
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  // Logout functionality
-  const logout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+  const loginWithMicrosoft = async (): Promise<boolean> => {
+    try {
+      console.log("Iniciando login com Microsoft...");
+      
+      // Como estamos utilizando callbackUrl agora, isso irá redirecionar para a
+      // página definida após o login bem-sucedido
+      const result = await nextAuthSignIn("azure-ad", {
+        callbackUrl: "/",
+        redirect: true
+      });
+      
+      console.log("Resultado do login com Microsoft:", result);
+      
+      // Como redirect é true, não esperamos um retorno direto
+      // O usuário será redirecionado automaticamente para a callbackUrl
+      return true;
+    } catch (error) {
+      console.error("Erro ao fazer login com Microsoft:", error);
+      toast.error("Erro ao fazer login com Microsoft");
+      return false;
+    }
   };
 
-  // Switch user for testing
-  const switchUser = (user: User) => {
-    setCurrentUser(user);
-    localStorage.setItem('currentUser', JSON.stringify(user));
+  const register = async (name: string, email: string, password: string): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast.error(data.error || "Erro ao registrar");
+        return false;
+      }
+
+      toast.success("Registro realizado com sucesso");
+      
+      // Fazer login automático após o registro
+      return await login(email, password);
+    } catch (error) {
+      console.error("Erro ao registrar:", error);
+      toast.error("Erro ao registrar");
+      return false;
+    }
+  };
+
+  const logout = async (): Promise<void> => {
+    try {
+      await nextAuthSignOut({ callbackUrl: "/" });
+      toast.info("Sessão encerrada");
+    } catch (error) {
+      console.error("Erro ao fazer logout:", error);
+      toast.error("Erro ao encerrar sessão");
+    }
+  };
+
+  // Valor do contexto
+  const contextValue: AuthContextType = {
+    user,
+    isAuthenticated,
+    isLoading: status === "loading",
+    isSystemAdmin,
+    authType,
+    login,
+    loginWithMicrosoft,
+    register,
+    logout,
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      currentUser, 
-      isLoading, 
-      error, 
-      login, 
-      logout, 
-      switchUser,
-      availableTestUsers
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-} 
+// Hook personalizado para usar o contexto
+export const useAuth = () => useContext(AuthContext); 

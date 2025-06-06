@@ -15,7 +15,7 @@ import {
   Compass,
 } from "lucide-react";
 import Image from "next/image";
-import { fetchGraphDataWithPermissions } from "@/lib/graph-with-permissions";
+import { toast } from '@/lib/utils';
 
 // Utility function to get node color based on node type
 const getNodeColor = (nodeType: string): string => {
@@ -105,15 +105,47 @@ export default function GraphPage() {
         // Handle company filter: if SISTEMA FIEAC is selected, show all nodes
         // Otherwise only show nodes that have the selected company (accounting for comma-separated values)
         if (filters.company && filters.company !== "SISTEMA FIEAC") {
-          // Guard against undefined company property
-          if (!node.properties?.company) return false;
+          // Check if node is of type "Empresa" and matches the selected company
+          if (node.label === "Empresa") {
+            const nodeName = node.properties?.nome || node.properties?.name || 
+                            node.properties?.SIGLA || node.properties?.sigla || '';
+            if (nodeName !== filters.company) {
+              return false;
+            }
+          }
 
-          // Handle comma-separated company values
-          const nodeCompanies = node.properties.company
-            .split(",")
-            .map((c: string) => c.trim());
-          if (!nodeCompanies.includes(filters.company)) {
-            return false;
+          // Skip nodes that aren't related to the selected company
+          // This would be handled better with actual relationship data in a real app
+          if (node.properties?.company) {
+            // Handle comma-separated company values
+            const nodeCompanies = node.properties.company
+              .split(",")
+              .map((c: string) => c.trim());
+            if (!nodeCompanies.includes(filters.company)) {
+              return false;
+            }
+          }
+        }
+
+        // Handle unit filter: if "Todas" is selected, show all nodes
+        // Otherwise only show the specific unit and related nodes
+        if (filters.unit && filters.unit !== "Todas") {
+          // Check if node is of type "Unidade" and matches the selected unit
+          if (node.label === "Unidade") {
+            const nodeName = node.properties?.nome || node.properties?.name || 
+                            node.properties?.SIGLA || node.properties?.sigla || '';
+            if (nodeName !== filters.unit) {
+              return false;
+            }
+          }
+
+          // For non-Unidade nodes, they would need a relationship to the selected unit
+          // This would be better implemented with actual relationship queries
+          // For now, we just check a simple property match if it exists
+          if (node.label !== "Unidade" && node.properties?.unit) {
+            if (node.properties.unit !== filters.unit) {
+              return false;
+            }
           }
         }
 
@@ -197,11 +229,26 @@ export default function GraphPage() {
     setError(null);
 
     try {
-      console.log("Fetching graph data...");
+      console.log("Fetching graph data");
       
       // Build URL with cache-busting parameter
       const params = new URLSearchParams();
       params.append('t', Date.now().toString());
+      
+      // Add search parameter if we have current filters with a search term
+      if (currentFilters && currentFilters.search) {
+        params.append('search', currentFilters.search);
+      }
+      
+      // Add unit filter parameter if not set to "Todas"
+      if (currentFilters && currentFilters.unit && currentFilters.unit !== "Todas") {
+        params.append('unit', currentFilters.unit);
+      }
+      
+      // Add company filter parameter if not set to "SISTEMA FIEAC"
+      if (currentFilters && currentFilters.company && currentFilters.company !== "SISTEMA FIEAC") {
+        params.append('company', currentFilters.company);
+      }
       
       // Make the API request with the parameters
       const response = await fetch(`/api/graph?${params.toString()}`);
@@ -246,15 +293,18 @@ export default function GraphPage() {
         setError(
           "Falha ao carregar os dados do grafo. Verifique se o Neo4j está em execução."
         );
+        toast.error("Falha ao carregar os dados do grafo");
       }
     } finally {
       if (isMountedRef.current) {
         setIsLoading(false);
       }
-      // Release the lock
-      isFetchingRef.current = false;
+      // Release the lock only after a short delay to prevent rapid fire requests
+      setTimeout(() => {
+        isFetchingRef.current = false;
+      }, 500);
     }
-  }, [currentFilters, computeFilteredData]); // Only depend on currentFilters and computeFilteredData
+  }, [currentFilters, computeFilteredData]);
 
   // Called when the "Generate Sample Data" button is clicked
   const seedDatabase = useCallback(async () => {
@@ -676,14 +726,4 @@ export default function GraphPage() {
       )}
     </div>
   );
-}
-
-export async function getGraphData() {
-  try {
-    // Use the permissions-aware version that filters based on user role
-    return await fetchGraphDataWithPermissions();
-  } catch (error) {
-    console.error("Error fetching graph data:", error);
-    return { nodes: [], relationships: [] };
-  }
 }

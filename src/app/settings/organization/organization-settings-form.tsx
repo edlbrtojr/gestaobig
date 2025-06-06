@@ -37,13 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
+import { toast } from '@/lib/utils';
 import Image from "next/image";
 import { FileUpload } from "@/components/file-upload";
-import { useOrganizationConfig } from "@/components/org-config-provider";
+import { useOrganizationConfig } from "@/contexts/org-config-provider";
 import { Badge } from "@/components/ui/badge";
 import { useFeatureFlags } from "@/lib/hooks/use-feature-flags";
+import { siteConfig as defaultSiteConfig } from "@/config/site";
 
 // Memoized logo preview component to prevent unnecessary re-renders
 const LogoPreview = memo(({ src, alt, isDarkMode = false }: { src: string, alt: string, isDarkMode?: boolean }) => {
@@ -125,6 +125,28 @@ const KeyFeature = memo(({ title, description, icon, enabled, onToggle, inDevelo
 
 KeyFeature.displayName = 'KeyFeature';
 
+// Então criamos uma função wrapper para useOrganizationConfig
+function useSafeOrganizationConfig() {
+  try {
+    // Tenta usar o hook do contexto
+    return useOrganizationConfig();
+  } catch (error) {
+    console.warn("OrgConfigProvider não encontrado, usando função de fallback");
+    
+    // Retorna uma implementação fictícia se o contexto não estiver disponível
+    return {
+      config: null,
+      isLoading: false,
+      error: new Error("OrgConfigProvider não disponível"),
+      refreshConfig: async () => {},
+      saveConfig: async (newConfig: OrganizationConfig) => {
+        console.warn("Tentativa de salvar configuração sem contexto disponível");
+        return false;
+      },
+    };
+  }
+}
+
 export default function OrganizationSettingsForm() {
   // Organization config state
   const [config, setConfig] = useState<OrganizationConfig>({
@@ -176,8 +198,9 @@ export default function OrganizationSettingsForm() {
   const [isErrorAlertOpen, setIsErrorAlertOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Get organization context
-  const { saveConfig } = useOrganizationConfig();
+  // Get organization context com tratamento de erro
+  const orgConfig = useSafeOrganizationConfig();
+  const { saveConfig } = orgConfig;
 
   // Feature flags state
   const { featureFlags, updateFeatureFlags, isFeatureEnabled } = useFeatureFlags();
@@ -187,11 +210,20 @@ export default function OrganizationSettingsForm() {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        // Fetch organization config
-        const configRes = await fetch('/api/config');
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          setConfig(configData);
+        // Try to fetch organization data from Neo4j first
+        const neo4jOrgRes = await fetch('/api/organization');
+        
+        if (neo4jOrgRes.ok) {
+          // If Neo4j data exists, use it
+          const orgData = await neo4jOrgRes.json();
+          setConfig(orgData);
+        } else {
+          // If Neo4j data doesn't exist, try to fetch from config API
+          const configRes = await fetch('/api/config');
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            setConfig(configData);
+          }
         }
 
         // Fetch strategic nodes
@@ -289,10 +321,25 @@ export default function OrganizationSettingsForm() {
   const saveOrganizationConfig = async () => {
     setIsSaving(true);
     try {
+      // First try to save via the context provider
       const success = await saveConfig(config);
       
-      if (!success) {
-        throw new Error('Failed to save organization settings');
+      // Now, also save directly to Neo4j
+      const response = await fetch('/api/organization', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          organization: {
+            ...config,
+            label: '_inAppOrgConfig', // Change the Neo4j label from Organization to _inAppOrgConfig
+          } 
+        }),
+      });
+
+      if (!response.ok && !success) {
+        throw new Error('Failed to save organization settings to both context and Neo4j');
       }
 
       setIsSuccessAlertOpen(true);
@@ -800,8 +847,6 @@ export default function OrganizationSettingsForm() {
 
   return (
     <div className="space-y-6">
-      <Toaster />
-
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Central de Configurações</h2>
@@ -1263,7 +1308,7 @@ export default function OrganizationSettingsForm() {
             </Button>
             <Button 
               onClick={createNode}
-              disabled={isSaving || !newNode.name || !newNode.description}
+              disabled={isSaving}
             >
               {isSaving ? "Criando..." : "Criar Nó"}
             </Button>

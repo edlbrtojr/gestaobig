@@ -2,7 +2,7 @@ import { Separator } from "@/components/ui/separator";
 
 export default function ApiSettingsPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h3 className="text-lg font-medium">Configurações de API</h3>
         <p className="text-sm text-muted-foreground">
@@ -12,7 +12,7 @@ export default function ApiSettingsPage() {
       
       <Separator />
       
-      <div className="space-y-4">
+      <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
           Configurações de API serão adicionadas aqui.
         </p>

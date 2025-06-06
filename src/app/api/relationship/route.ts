@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       process.env.NEO4J_URI || "bolt://localhost:7687",
       neo4j.auth.basic(
         process.env.NEO4J_USER || "neo4j",
-        process.env.NEO4J_PASSWORD || "3d1Jun1or"
+        process.env.NEO4J_PASSWORD || ""
       )
     );
 

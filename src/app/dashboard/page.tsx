@@ -7,10 +7,10 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { getGraphSchema } from "@/lib/schema";
 import { Pencil, Save, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
 import { saveDashboardConfigToDb, getDashboardConfigFromDb } from "@/lib/dashboard";
-import { isDatabaseAvailable, resetConnectionError } from "@/lib/neo4j";
+import { resetConnectionError } from "@/lib/neo4j";
 
 // Configuração padrão do dashboard
 const DEFAULT_DASHBOARD_CONFIG: DashboardConfigType = {
@@ -24,47 +24,12 @@ export default function DashboardPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDbConnected, setIsDbConnected] = useState<boolean | null>(null);
-  const [isCheckingDb, setIsCheckingDb] = useState(false);
   const [availableNodeTypes, setAvailableNodeTypes] = useState<string[]>([]);
-
-  // Verificar conectividade do banco de dados
-  const checkDatabaseConnection = async () => {
-    setIsCheckingDb(true);
-    try {
-      const isAvailable = await isDatabaseAvailable();
-      setIsDbConnected(isAvailable);
-      
-      if (!isAvailable) {
-        toast.error("Sem conexão com o Neo4j", {
-          description: "Usando apenas localStorage para armazenar configurações.",
-          duration: 5000,
-        });
-      }
-    } catch (error) {
-      setIsDbConnected(false);
-      toast.error("Erro ao verificar conexão", {
-        description: "Não foi possível verificar a conexão com o Neo4j.",
-      });
-    } finally {
-      setIsCheckingDb(false);
-    }
-  };
-
-  // Tentar reconectar ao banco de dados
-  const handleReconnect = async () => {
-    resetConnectionError();
-    toast.info("Tentando reconectar...");
-    await checkDatabaseConnection();
-  };
 
   // Carregar configuração do dashboard do banco de dados ou localStorage na primeira renderização
   useEffect(() => {
     const loadDashboardConfig = async () => {
       try {
-        // Verificar conectividade do banco de dados
-        await checkDatabaseConnection();
-        
         // Tentar carregar do banco de dados primeiro (com fallback para localStorage)
         const dbConfig = await getDashboardConfigFromDb();
         
@@ -274,19 +239,6 @@ export default function DashboardPage() {
           <h1 className="text-xl font-semibold">Dashboard</h1>
           
           <div className="ml-auto flex items-center gap-4">
-            {isDbConnected === false && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="flex items-center gap-1 text-orange-500 border-orange-500 hover:text-orange-600 hover:border-orange-600"
-                onClick={handleReconnect}
-                disabled={isCheckingDb}
-              >
-                <RefreshCw className={`h-4 w-4 ${isCheckingDb ? 'animate-spin' : ''}`} />
-                {isCheckingDb ? "Verificando..." : "Reconectar ao Neo4j"}
-              </Button>
-            )}
-            
             <div className="flex items-center gap-2">
               <Switch
                 id="edit-mode"
@@ -331,16 +283,6 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {isDbConnected === false && (
-              <div className="w-full bg-orange-50 border border-orange-200 rounded-md p-3 mb-4 text-orange-700 text-sm">
-                <p className="font-medium">⚠️ Modo offline</p>
-                <p className="text-xs mt-1">
-                  O dashboard está funcionando em modo offline com armazenamento local. 
-                  As alterações não serão sincronizadas com o banco de dados Neo4j até que a conexão seja restaurada.
-                </p>
-              </div>
-            )}
-            
             <DashboardGrid 
               widgets={dashboardConfig.widgets}
               onRemoveWidget={removeWidget}

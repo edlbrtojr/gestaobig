@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { getGraphSchema } from "@/lib/schema"; // Import the schema utility
+import { toast } from "@/lib/utils";
 
 interface GraphViewProps {
   data: GraphData;
@@ -70,40 +71,47 @@ const defaultColor = "#757575"; // Darker Gray for unknowns
 // Default label color for unknown node types
 const defaultLabelColor = "#FFFFFF"; // White for unknown types
 
+// Define a single default color for error states
+const errorNodeColor = "#757575"; // Gray for error state
+const errorLabelColor = "#FFFFFF"; // White for error state text
+
 // Function to poll schema from the API endpoint
 const setupSchemaPolling = (callback: () => void) => {
   // Poll the schema API endpoint
   const pollSchema = async () => {
     try {
-      const response = await fetch('/api/schema');
+      const response = await fetch("/api/schema");
       if (response.ok) {
         callback();
+      } else {
+        throw new Error(`Failed to fetch schema: ${response.statusText}`);
       }
     } catch (error) {
       console.error("Error polling schema:", error);
     }
   };
-  
+
   // Instead of polling frequently, check only once every 5 minutes
   // This should drastically reduce the number of API calls
   const interval = setInterval(pollSchema, 300000);
-  
-  // Don't call pollSchema immediately on component mount
-  // The initial load will be handled by the loadNodeColors call later
-  
+
   return () => clearInterval(interval);
 };
 
 // Define group centers for semantic clustering
 // Each label type will have its own orbital radius and angle
-const calculateGroupCenters = (width: number, height: number, labels: string[]): Record<string, {x: number, y: number, r: number}> => {
-  const centers: Record<string, {x: number, y: number, r: number}> = {};
+const calculateGroupCenters = (
+  width: number,
+  height: number,
+  labels: string[]
+): Record<string, { x: number; y: number; r: number }> => {
+  const centers: Record<string, { x: number; y: number; r: number }> = {};
   const centerX = width / 2;
   const centerY = height / 2;
-  
+
   // Base distance from center for the group orbits
   const baseRadius = Math.min(width, height) * 0.25;
-  
+
   // Distribute the labels evenly in a circle
   labels.forEach((label, i) => {
     // Calculate angle based on position in array
@@ -113,10 +121,10 @@ const calculateGroupCenters = (width: number, height: number, labels: string[]):
     const y = centerY + baseRadius * Math.sin(angle);
     // Different radius for each group's internal clustering
     const r = baseRadius * 0.4;
-    
+
     centers[label] = { x, y, r };
   });
-  
+
   return centers;
 };
 
@@ -130,17 +138,22 @@ const formatValue = (value: any): string => {
   if (value === null || value === undefined) {
     return "";
   }
-  
+
   // Handle Neo4j integer objects
-  if (typeof value === "object" && value !== null && "low" in value && "high" in value) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "low" in value &&
+    "high" in value
+  ) {
     return value.low.toString();
   }
-  
+
   // Handle other objects by converting to JSON
   if (typeof value === "object" && value !== null) {
     return JSON.stringify(value);
   }
-  
+
   // Return string representation for other types
   return String(value);
 };
@@ -152,20 +165,39 @@ const safeExtractNodeId = (id: any): number => {
   return Number(id);
 };
 
-export default function GraphView({ 
-  data, 
+// Define label colors based on the color contrast matrix
+const getContrastColor = (backgroundColor: string): string => {
+  // Simple algorithm to determine if text should be white or black based on background
+  // Convert hex to RGB
+  const hex = backgroundColor.replace("#", "");
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+
+  // Calculate relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+  // Return white for dark backgrounds, black for light backgrounds
+  return luminance > 0.5 ? "#000000" : "#FFFFFF";
+};
+
+export default function GraphView({
+  data,
   onNodeSelected,
   onRelationshipSelected,
-  searchHighlight 
+  searchHighlight,
 }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
-  const [selectedRelationship, setSelectedRelationship] = useState<D3Link | null>(null);
+  const [selectedRelationship, setSelectedRelationship] =
+    useState<D3Link | null>(null);
   const selectedNodeRef = useRef<D3Node | null>(null);
   const selectedRelationshipRef = useRef<D3Link | null>(null);
   const [connectedNodes, setConnectedNodes] = useState<number[]>([]);
-  const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>({});
+  const [categorizedNodes, setCategorizedNodes] = useState<CategorizedNodes>(
+    {}
+  );
   const [showCategorized, setShowCategorized] = useState(false);
   const { theme, resolvedTheme } = useTheme();
   const [initialized, setInitialized] = useState(false);
@@ -176,52 +208,74 @@ export default function GraphView({
   const dataRef = useRef(data); // Store previous data reference
   const renderingRef = useRef(false); // Track if we're currently rendering
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [nodeColors, setNodeColors] = useState<Record<string, string>>(defaultNodeColors);
+  const [nodeColors, setNodeColors] =
+    useState<Record<string, string>>(defaultNodeColors);
   const [isLoadingColors, setIsLoadingColors] = useState(true);
   // Track view mode: 'standard', 'search', or 'selection'
-  const [viewMode, setViewMode] = useState<'standard' | 'search' | 'selection'>('standard');
+  const [viewMode, setViewMode] = useState<"standard" | "search" | "selection">(
+    "standard"
+  );
   // Store search matching node IDs
   const matchingNodeIdsRef = useRef<Set<number>>(new Set());
   // Add new state for hierarchical levels
-  const [hierarchyLevels, setHierarchyLevels] = useState<Record<number, number>>({});
+  const [hierarchyLevels, setHierarchyLevels] = useState<
+    Record<number, number>
+  >({});
   // Add state for fisheye distortion center
-  const [distortionCenter, setDistortionCenter] = useState<{x: number, y: number} | null>(null);
+  const [distortionCenter, setDistortionCenter] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [enableFisheye, setEnableFisheye] = useState(false); // Keep this off by default
-  const [groupCentersMap, setGroupCentersMap] = useState<Record<string, {x: number, y: number, r: number}>>({});
+  const [groupCentersMap, setGroupCentersMap] = useState<
+    Record<string, { x: number; y: number; r: number }>
+  >({});
 
   // Load node colors from schema
   const loadNodeColors = async () => {
     // Skip if already loading
     if (isLoadingColors) return;
-    
+
     try {
       setIsLoadingColors(true);
-      
+
       const schema = await getGraphSchema();
-      const newColors: Record<string, string> = { ...defaultNodeColors };
-      
+      if (!schema || !schema.nodeTypes) {
+        throw new Error("Invalid schema format received from API");
+      }
+
+      const newColors: Record<string, string> = {};
+
       // Extract colors from schema
       Object.entries(schema.nodeTypes).forEach(([key, nodeType]) => {
         if (nodeType.color) {
           // Map both the key and label to the color (in case they differ)
           newColors[key] = nodeType.color;
           newColors[nodeType.label] = nodeType.color;
+        } else {
+          throw new Error(`No color defined for node type: ${key}`);
         }
       });
-      
+
+      if (Object.keys(newColors).length === 0) {
+        throw new Error("No node colors defined in schema");
+      }
+
       // Deep comparison to check if colors actually changed
       let colorsChanged = false;
-      
+
       // Use stable algorithm for comparison
-      const allKeys = Array.from(new Set([...Object.keys(nodeColors), ...Object.keys(newColors)]));
-      
+      const allKeys = Array.from(
+        new Set([...Object.keys(nodeColors), ...Object.keys(newColors)])
+      );
+
       for (const key of allKeys) {
         if (nodeColors[key] !== newColors[key]) {
           colorsChanged = true;
           break;
         }
       }
-      
+
       // Only update state if colors actually changed to prevent rerenders
       if (colorsChanged) {
         console.log("Node colors changed, updating state");
@@ -231,6 +285,11 @@ export default function GraphView({
       }
     } catch (error) {
       console.error("Failed to load node colors from schema:", error);
+      toast.error(
+        `Failed to load node colors: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     } finally {
       setIsLoadingColors(false);
     }
@@ -240,59 +299,90 @@ export default function GraphView({
   useEffect(() => {
     // Prevent multiple calls when data hasn't changed
     if (isLoadingColors) return;
-    
+
     // Initialize loading flag
     let isMounted = true;
-    
+
     // Handler for custom event
     const handleSchemaUpdated = () => {
       if (isMounted) loadNodeColors();
     };
-    
+
     // Listen for direct schema update events
-    window.addEventListener('schemaUpdated', handleSchemaUpdated);
-    
+    window.addEventListener("schemaUpdated", handleSchemaUpdated);
+
     // Set up polling for schema changes - but only call loadNodeColors once at initialization
     const cleanupPolling = setupSchemaPolling(() => {
       if (isMounted) loadNodeColors();
     });
-    
+
     // Initial load of colors - only if we haven't loaded them yet
-    if (!Object.keys(nodeColors).length || Object.keys(nodeColors).length === Object.keys(defaultNodeColors).length) {
+    if (
+      !Object.keys(nodeColors).length ||
+      Object.keys(nodeColors).length === Object.keys(defaultNodeColors).length
+    ) {
       loadNodeColors();
     }
-    
+
     return () => {
       isMounted = false;
-      window.removeEventListener('schemaUpdated', handleSchemaUpdated);
+      window.removeEventListener("schemaUpdated", handleSchemaUpdated);
       cleanupPolling();
     };
-  }, []);  // Empty dependency array to ensure this only runs once on mount
+  }, []); // Empty dependency array to ensure this only runs once on mount
 
   // Use memo for expensive graph data processing
   const [processedData, nodeMap] = useMemo(() => {
     if (!data.nodes.length) return [null, new Map()];
 
+    // Create node map only with valid nodes (excluding system nodes)
     const map = new Map();
-    // Process nodes
-    const processedNodes = data.nodes.map((node) => {
-      const nodeId =
-        typeof node.id === "object" && node.id !== null
-          ? node.id.low
-          : Number(node.id);
 
-      const d3Node = {
-        ...node,
-        id: nodeId,
-      };
-      map.set(nodeId, d3Node);
-      return d3Node;
+    // System node types that should never be displayed
+    const systemNodeTypes = ["NodeVisibility", "NodePermission"];
+
+    // Process nodes - filter out system nodes and nodes with labels starting with underscore
+    const processedNodes = data.nodes
+      .filter((node) => {
+        // Exclude specific system node types
+        if (systemNodeTypes.includes(node.label)) return false;
+        // Exclude any node whose label starts with underscore (system node)
+        if (node.label && node.label.startsWith('_')) return false;
+        return true;
+      })
+      .map((node) => {
+        const nodeId =
+          typeof node.id === "object" && node.id !== null
+            ? node.id.low
+            : Number(node.id);
+
+        const d3Node = {
+          ...node,
+          id: nodeId,
+        };
+        map.set(nodeId, d3Node);
+        return d3Node;
+      });
+
+    // Filter out relationships that involve system nodes
+    const filteredRelationships = data.relationships.filter((rel) => {
+      const sourceId =
+        typeof rel.source === "object" && rel.source !== null
+          ? rel.source.low
+          : Number(rel.source);
+      const targetId =
+        typeof rel.target === "object" && rel.target !== null
+          ? rel.target.low
+          : Number(rel.target);
+
+      // Check if the source or target node is in our filtered set
+      return map.has(sourceId) && map.has(targetId);
     });
 
     return [
       {
         nodes: processedNodes,
-        relationships: data.relationships,
+        relationships: filteredRelationships,
       },
       map,
     ];
@@ -376,83 +466,93 @@ export default function GraphView({
   // New effect to calculate hierarchy levels based on relationships
   useEffect(() => {
     if (!data.nodes.length || !data.relationships.length) return;
-    
+
     // Start by finding potential root nodes (nodes with outgoing but no incoming relationships)
     const incomingEdges: Record<number, number> = {};
     const outgoingEdges: Record<number, number> = {};
-    
+
     // Count incoming and outgoing edges for each node
-    data.relationships.forEach(rel => {
+    data.relationships.forEach((rel) => {
       const sourceId = safeExtractNodeId(rel.source);
       const targetId = safeExtractNodeId(rel.target);
-      
+
       incomingEdges[targetId] = (incomingEdges[targetId] || 0) + 1;
       outgoingEdges[sourceId] = (outgoingEdges[sourceId] || 0) + 1;
     });
-    
+
     // Identify root nodes (nodes with outgoing edges but no incoming edges)
     const rootNodeIds = data.nodes
-      .filter(node => {
+      .filter((node) => {
         const nodeId = safeExtractNodeId(node.id);
         return outgoingEdges[nodeId] && !incomingEdges[nodeId];
       })
-      .map(node => safeExtractNodeId(node.id));
-    
+      .map((node) => safeExtractNodeId(node.id));
+
     // If no clear root nodes, use nodes with more outgoing than incoming edges
     if (rootNodeIds.length === 0) {
-      rootNodeIds.push(...data.nodes
-        .filter(node => {
-          const nodeId = safeExtractNodeId(node.id);
-          return (outgoingEdges[nodeId] || 0) > (incomingEdges[nodeId] || 0);
-        })
-        .map(node => safeExtractNodeId(node.id))
+      rootNodeIds.push(
+        ...data.nodes
+          .filter((node) => {
+            const nodeId = safeExtractNodeId(node.id);
+            return (outgoingEdges[nodeId] || 0) > (incomingEdges[nodeId] || 0);
+          })
+          .map((node) => safeExtractNodeId(node.id))
       );
     }
-    
+
     // Still no roots? Use any node with the most connections
     if (rootNodeIds.length === 0 && data.nodes.length > 0) {
-      const nodeWithMostConnections = data.nodes.reduce((max, node) => {
-        const nodeId = safeExtractNodeId(node.id);
-        const connections = (outgoingEdges[nodeId] || 0) + (incomingEdges[nodeId] || 0);
-        return connections > max.connections ? { id: nodeId, connections } : max;
-      }, { id: -1, connections: -1 });
-      
+      const nodeWithMostConnections = data.nodes.reduce(
+        (max, node) => {
+          const nodeId = safeExtractNodeId(node.id);
+          const connections =
+            (outgoingEdges[nodeId] || 0) + (incomingEdges[nodeId] || 0);
+          return connections > max.connections
+            ? { id: nodeId, connections }
+            : max;
+        },
+        { id: -1, connections: -1 }
+      );
+
       if (nodeWithMostConnections.id !== -1) {
         rootNodeIds.push(nodeWithMostConnections.id);
       }
     }
-    
+
     // Build adjacency list for the graph
     const adjList: Record<number, number[]> = {};
-    data.relationships.forEach(rel => {
+    data.relationships.forEach((rel) => {
       const sourceId = safeExtractNodeId(rel.source);
       const targetId = safeExtractNodeId(rel.target);
-      
+
       if (!adjList[sourceId]) adjList[sourceId] = [];
       if (!adjList[targetId]) adjList[targetId] = [];
-      
+
       adjList[sourceId].push(targetId);
     });
-    
+
     // Assign hierarchy levels using BFS from root nodes
     const newHierarchyLevels: Record<number, number> = {};
     const visited = new Set<number>();
-    
+
     // Queue for BFS with [nodeId, level]
-    const queue: [number, number][] = rootNodeIds.map(id => [id, 0]);
-    
+    const queue: [number, number][] = rootNodeIds.map((id) => [id, 0]);
+
     while (queue.length > 0) {
       const [nodeId, level] = queue.shift()!;
-      
+
       if (visited.has(nodeId)) {
         // If we've seen this node before, keep the minimum level
-        newHierarchyLevels[nodeId] = Math.min(level, newHierarchyLevels[nodeId] || Infinity);
+        newHierarchyLevels[nodeId] = Math.min(
+          level,
+          newHierarchyLevels[nodeId] || Infinity
+        );
         continue;
       }
-      
+
       visited.add(nodeId);
       newHierarchyLevels[nodeId] = level;
-      
+
       // Add neighbors to the queue
       const neighbors = adjList[nodeId] || [];
       for (const neighbor of neighbors) {
@@ -461,31 +561,38 @@ export default function GraphView({
         }
       }
     }
-    
+
     // For any unvisited nodes, assign a middle level
     const maxLevel = Math.max(...Object.values(newHierarchyLevels), 0);
     const defaultLevel = Math.ceil(maxLevel / 2);
-    
-    data.nodes.forEach(node => {
+
+    data.nodes.forEach((node) => {
       const nodeId = safeExtractNodeId(node.id);
       if (!visited.has(nodeId)) {
         newHierarchyLevels[nodeId] = defaultLevel;
       }
     });
-    
+
     setHierarchyLevels(newHierarchyLevels);
-    
+
     // Get all unique node labels for group centers
-    const uniqueLabels = Array.from(new Set(data.nodes.map(node => node.label)));
-    
+    const uniqueLabels = Array.from(
+      new Set(data.nodes.map((node) => node.label))
+    );
+
     // Calculate group centers
     if (svgRef.current) {
-      const containerWidth = svgRef.current.parentElement?.clientWidth || window.innerWidth;
-      const containerHeight = svgRef.current.parentElement?.clientHeight || window.innerHeight;
-      const centers = calculateGroupCenters(containerWidth, containerHeight, uniqueLabels);
+      const containerWidth =
+        svgRef.current.parentElement?.clientWidth || window.innerWidth;
+      const containerHeight =
+        svgRef.current.parentElement?.clientHeight || window.innerHeight;
+      const centers = calculateGroupCenters(
+        containerWidth,
+        containerHeight,
+        uniqueLabels
+      );
       setGroupCentersMap(centers);
     }
-    
   }, [data.nodes, data.relationships]);
 
   // Main graph initialization effect that should not depend on node selection
@@ -639,9 +746,11 @@ export default function GraphView({
           categorized[node.label].push(node);
         });
         Object.keys(categorized).forEach((category) => {
-          categorized[category].sort((a, b) =>
-            a.properties.name.localeCompare(b.properties.name)
-          );
+          categorized[category].sort((a, b) => {
+            const nameA = a.properties?.name || "";
+            const nameB = b.properties?.name || "";
+            return nameA.localeCompare(nameB);
+          });
         });
         setCategorizedNodes(categorized);
       };
@@ -668,7 +777,7 @@ export default function GraphView({
         .scaleExtent([0.1, 8])
         .on("zoom", (event) => {
           g.attr("transform", event.transform);
-          
+
           // Update distortion center for fisheye effect when zooming
           if (enableFisheye && distortionCenter) {
             // Convert mouse coordinates to simulation space
@@ -680,7 +789,7 @@ export default function GraphView({
         });
 
       svg.call(zoom as any);
-      
+
       // Mouse move handler for fisheye distortion
       svg.on("mousemove", (event) => {
         if (enableFisheye) {
@@ -702,11 +811,11 @@ export default function GraphView({
       svg.on("click", (event) => {
         // Prevent click handler from firing when clicking on a node or relationship
         if (event.defaultPrevented) return;
-        
+
         console.log("SVG click, current mode:", viewMode);
-        
+
         // Two-stage clearing behavior
-        if (viewMode === 'selection') {
+        if (viewMode === "selection") {
           console.log("Selection mode, returning to search mode");
           // If we're in selection mode, go back to search mode if we have search results
           if (searchHighlight && matchingNodeIdsRef.current.size > 0) {
@@ -719,104 +828,115 @@ export default function GraphView({
             setShowCategorized(false);
             setIsEditing(false);
             setIsEditingRelationship(false);
-            
+
             // Change to search mode
-            setViewMode('search');
-            
+            setViewMode("search");
+
             if (onNodeSelected) {
               onNodeSelected(null);
             }
-            
+
             // Apply search highlighting
             const t = d3.transition().duration(300);
-            
+
             // Get theme colors directly to avoid dependency issues
             const isDarkTheme =
               resolvedTheme === "dark" ||
               document.documentElement.classList.contains("dark") ||
               document.documentElement.getAttribute("data-theme") === "dark";
-            
+
             const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
-            
+
             // First dim all nodes
-            svg.selectAll('.nodes g .node-circle')
+            svg
+              .selectAll(".nodes g .node-circle")
               .transition(t)
-              .attr('opacity', 0.15)
-              .style('opacity', 0.15)
-              .attr('stroke-width', 1);
-            
+              .attr("opacity", 0.15)
+              .style("opacity", 0.15)
+              .attr("stroke-width", 1);
+
             // Dim all text elements
-            svg.selectAll('.nodes g .node-name-text')
+            svg
+              .selectAll(".nodes g .node-name-text")
               .transition(t)
-              .attr('opacity', 0.08)
-              .style('opacity', 0.08)
-              .attr('fill', '#FFFFFF');
-            
-            svg.selectAll('.nodes g .node-type-text')
+              .attr("opacity", 0.08)
+              .style("opacity", 0.08)
+              .attr("fill", "#FFFFFF");
+
+            svg
+              .selectAll(".nodes g .node-type-text")
               .transition(t)
-              .attr('opacity', 0.08)
-              .style('opacity', 0.08);
-            
+              .attr("opacity", 0.08)
+              .style("opacity", 0.08);
+
             // Dim relationships
-            svg.selectAll('.links line')
+            svg
+              .selectAll(".links line")
               .transition(t)
-              .attr('stroke-opacity', 0.15)
-              .style('stroke-opacity', 0.15)
-              .attr('stroke-width', 1);
-            
-            svg.selectAll('.links text')
+              .attr("stroke-opacity", 0.15)
+              .style("stroke-opacity", 0.15)
+              .attr("stroke-width", 1);
+
+            svg
+              .selectAll(".links text")
               .transition(t)
-              .attr('opacity', 0.1)
-              .style('opacity', 0.1);
-            
+              .attr("opacity", 0.1)
+              .style("opacity", 0.1);
+
             // Highlight matching nodes again
-            svg.selectAll('.nodes g')
-              .filter(function() {
-                const nodeId = Number(d3.select(this).attr('data-id'));
+            svg
+              .selectAll(".nodes g")
+              .filter(function () {
+                const nodeId = Number(d3.select(this).attr("data-id"));
                 return matchingNodeIdsRef.current.has(nodeId);
               })
-              .each(function() {
+              .each(function () {
                 const node = d3.select(this);
-                
+
                 // Highlight the circle
-                node.select('.node-circle')
+                node
+                  .select(".node-circle")
                   .transition(t)
-                  .attr('opacity', 1)
-                  .style('opacity', 1)
-                  .attr('stroke-width', 2.5)
-                  .attr('stroke', textColor);
-                
+                  .attr("opacity", 1)
+                  .style("opacity", 1)
+                  .attr("stroke-width", 2.5)
+                  .attr("stroke", textColor);
+
                 // Highlight name text with better forced visibility
-                node.select('.node-name-text')
+                node
+                  .select(".node-name-text")
                   .transition(t)
-                  .attr('opacity', 1)
-                  .style('opacity', 1)
-                  .attr('fill', '#FFFFFF');
-                
+                  .attr("opacity", 1)
+                  .style("opacity", 1)
+                  .attr("fill", "#FFFFFF");
+
                 // Highlight type text
-                node.select('.node-type-text')
+                node
+                  .select(".node-type-text")
                   .transition(t)
-                  .attr('opacity', 1)
-                  .style('opacity', 1);
+                  .attr("opacity", 1)
+                  .style("opacity", 1);
               });
-              
+
             event.stopPropagation();
             return; // Exit early after restoring search results
           }
-        } else if (viewMode === 'search') {
+        } else if (viewMode === "search") {
           console.log("Search mode, clearing search");
           // If we're in search mode, clear search and go to standard mode
-          setViewMode('standard');
+          setViewMode("standard");
           // Clear the search term by dispatching a custom event that the parent can listen for
-          window.dispatchEvent(new CustomEvent('clearSearchTerm', {}));
+          window.dispatchEvent(new CustomEvent("clearSearchTerm", {}));
           // Also ensure the search results counter is removed
-          window.dispatchEvent(new CustomEvent('searchResultsCount', { 
-            detail: { count: 0, term: '' } 
-          }));
-          
+          window.dispatchEvent(
+            new CustomEvent("searchResultsCount", {
+              detail: { count: 0, term: "" },
+            })
+          );
+
           event.stopPropagation();
         }
-        
+
         // Standard behavior - clear all selections and restore standard view
         console.log("Standard mode, clearing all selections");
         setSelectedNode(null);
@@ -827,14 +947,14 @@ export default function GraphView({
         setShowCategorized(false);
         setIsEditing(false);
         setIsEditingRelationship(false);
-        setViewMode('standard');
+        setViewMode("standard");
 
         if (onNodeSelected) {
           onNodeSelected(null);
         }
 
         const t = d3.transition().duration(300);
-        
+
         // Get theme colors directly to avoid reference issues
         const isDarkTheme =
           resolvedTheme === "dark" ||
@@ -848,7 +968,8 @@ export default function GraphView({
           .trim();
 
         // Reset node circles
-        svg.selectAll(".nodes g .node-circle")
+        svg
+          .selectAll(".nodes g .node-circle")
           .transition(t)
           .attr("opacity", 1)
           .style("opacity", 1)
@@ -863,20 +984,23 @@ export default function GraphView({
           .attr("stroke-width", 1.5);
 
         // Reset node name text
-        svg.selectAll(".nodes g .node-name-text")
+        svg
+          .selectAll(".nodes g .node-name-text")
           .transition(t)
           .attr("opacity", 1)
           .style("opacity", 1)
           .attr("fill", "#FFFFFF");
 
         // Reset node type text
-        svg.selectAll(".nodes g .node-type-text")
+        svg
+          .selectAll(".nodes g .node-type-text")
           .transition(t)
           .attr("opacity", 1)
           .style("opacity", 1);
 
         // Reset relationship lines
-        svg.selectAll(".links line")
+        svg
+          .selectAll(".links line")
           .transition(t)
           .attr("stroke", linkColor)
           .attr("stroke-opacity", 0.5)
@@ -884,27 +1008,35 @@ export default function GraphView({
           .attr("stroke-width", 1.5);
 
         // Reset relationship text
-        svg.selectAll(".links text")
+        svg
+          .selectAll(".links text")
           .transition(t)
           .attr("fill", textColor)
           .attr("opacity", 0.7)
           .style("opacity", 0.7)
           .attr("font-weight", "normal");
-          
+
         // Also ensure the search results counter is removed when clicking elsewhere
-        window.dispatchEvent(new CustomEvent('searchResultsCount', { 
-          detail: { count: 0, term: '' } 
-        }));
+        window.dispatchEvent(
+          new CustomEvent("searchResultsCount", {
+            detail: { count: 0, term: "" },
+          })
+        );
       });
 
       // Get unique labels for node group definitions
-      const uniqueLabels = Array.from(new Set(nodes.map(node => node.label)));
-      
+      const uniqueLabels = Array.from(new Set(nodes.map((node) => node.label)));
+
       // Calculate group centers for clustering if not already calculated
-      const groupCenters = Object.keys(groupCentersMap).length > 0 
-        ? groupCentersMap 
-        : calculateGroupCenters(containerWidth, containerHeight, uniqueLabels);
-      
+      const groupCenters =
+        Object.keys(groupCentersMap).length > 0
+          ? groupCentersMap
+          : calculateGroupCenters(
+              containerWidth,
+              containerHeight,
+              uniqueLabels
+            );
+
       // Configure the simulation with improved forces for better node positioning
       const simulation = d3
         .forceSimulation(nodes)
@@ -916,9 +1048,12 @@ export default function GraphView({
             .distance(250) // Increased from 180 to spread nodes further apart
             .strength(0.15) // Reduced from dynamic value to a constant lower value for looser connections
         )
-        .force("charge", d3.forceManyBody()
-          .strength(-1200) // Stronger repulsion to push nodes further apart
-          .distanceMax(800) // Increased from 500 to extend the effective range of the charge
+        .force(
+          "charge",
+          d3
+            .forceManyBody()
+            .strength(-1200) // Stronger repulsion to push nodes further apart
+            .distanceMax(800) // Increased from 500 to extend the effective range of the charge
         )
         .force(
           "center",
@@ -926,19 +1061,29 @@ export default function GraphView({
         )
         .force(
           "collide",
-          d3.forceCollide().radius((d: any) => getNodeRadius(d.id) + 50).strength(0.7) // Increased spacing and reduced strength
+          d3
+            .forceCollide()
+            .radius((d: any) => getNodeRadius(d.id) + 50)
+            .strength(0.7) // Increased spacing and reduced strength
         )
         // Remove type-based clustering and hierarchy constraints
         // Add a simple radial force to distribute isolated nodes
-        .force("radial", d3.forceRadial(
-          (d) => {
-            const count = connectionCounts.get((d as D3Node).id) || 0;
-            // Give isolated nodes a slight outward push
-            return count === 0 ? containerWidth * 0.4 : containerWidth * 0.2;
-          },
-          containerWidth / 2,
-          containerHeight / 2
-        ).strength(0.05)) // Very gentle force
+        .force(
+          "radial",
+          d3
+            .forceRadial(
+              (d) => {
+                const count = connectionCounts.get((d as D3Node).id) || 0;
+                // Give isolated nodes a slight outward push
+                return count === 0
+                  ? containerWidth * 0.4
+                  : containerWidth * 0.2;
+              },
+              containerWidth / 2,
+              containerHeight / 2
+            )
+            .strength(0.05)
+        ) // Very gentle force
         .alpha(0.6) // Higher initial energy for more dynamic movement
         .alphaDecay(0.008); // Slightly faster decay for quicker stabilization
 
@@ -948,23 +1093,24 @@ export default function GraphView({
       // Apply fisheye distortion if enabled
       const applyFisheyeDistortion = () => {
         if (!enableFisheye || !distortionCenter) return;
-        
+
         // Simple fisheye implementation
         const distortionRadius = 200; // Radius of effect
         const distortionFactor = 2.5; // Magnification factor
-        
-        nodes.forEach(node => {
+
+        nodes.forEach((node) => {
           if (node.fx !== null || node.fy !== null) return; // Skip fixed nodes
-          
+
           // Calculate distance from distortion center
           const dx = (node.x || 0) - distortionCenter.x;
           const dy = (node.y || 0) - distortionCenter.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (distance < distortionRadius) {
             // Calculate distortion factor (decreasing with distance)
-            const factor = 1 + (distortionFactor * (1 - distance / distortionRadius));
-            
+            const factor =
+              1 + distortionFactor * (1 - distance / distortionRadius);
+
             // Apply distortion from the center point
             node.x = distortionCenter.x + dx * factor;
             node.y = distortionCenter.y + dy * factor;
@@ -977,9 +1123,9 @@ export default function GraphView({
         if (enableFisheye && distortionCenter) {
           applyFisheyeDistortion();
         }
-        
+
         g.selectAll(".links line")
-          .attr("x1", function(d: any): number {
+          .attr("x1", function (d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -988,23 +1134,23 @@ export default function GraphView({
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
             if (!targetNode) return sourceNode.x ?? 0;
-            
+
             // Calculate source radius
             const sourceRadius = getNodeRadius(sourceNode.id);
             const sx = sourceNode.x ?? 0;
             const sy = sourceNode.y ?? 0;
             const tx = targetNode.x ?? 0;
             const ty = targetNode.y ?? 0;
-            
+
             // Calculate angle
             const dx = tx - sx;
             const dy = ty - sy;
             const angle = Math.atan2(dy, dx);
-            
+
             // Start line at edge of source node
-            return sx + (sourceRadius * Math.cos(angle));
+            return sx + sourceRadius * Math.cos(angle);
           })
-          .attr("y1", function(d: any): number {
+          .attr("y1", function (d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -1013,23 +1159,23 @@ export default function GraphView({
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
             if (!targetNode) return sourceNode.y ?? 0;
-            
+
             // Calculate source radius
             const sourceRadius = getNodeRadius(sourceNode.id);
             const sx = sourceNode.x ?? 0;
             const sy = sourceNode.y ?? 0;
             const tx = targetNode.x ?? 0;
             const ty = targetNode.y ?? 0;
-            
+
             // Calculate angle
             const dx = tx - sx;
             const dy = ty - sy;
             const angle = Math.atan2(dy, dx);
-            
+
             // Start line at edge of source node
-            return sy + (sourceRadius * Math.sin(angle));
+            return sy + sourceRadius * Math.sin(angle);
           })
-          .attr("x2", function(d: any): number {
+          .attr("x2", function (d: any): number {
             const targetNode = nodeMap.get(
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
@@ -1038,23 +1184,23 @@ export default function GraphView({
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
             if (!sourceNode) return targetNode.x ?? 0;
-            
+
             // Calculate target radius
             const targetRadius = getNodeRadius(targetNode.id);
             const sx = sourceNode.x ?? 0;
             const sy = sourceNode.y ?? 0;
             const tx = targetNode.x ?? 0;
             const ty = targetNode.y ?? 0;
-            
+
             // Calculate angle
             const dx = sx - tx;
             const dy = sy - ty;
             const angle = Math.atan2(dy, dx);
-            
+
             // End line at edge of target node
-            return tx + (targetRadius * Math.cos(angle));
+            return tx + targetRadius * Math.cos(angle);
           })
-          .attr("y2", function(d: any): number {
+          .attr("y2", function (d: any): number {
             const targetNode = nodeMap.get(
               typeof d.target === "object" ? d.target.id : d.target
             ) as D3Node | undefined;
@@ -1063,27 +1209,27 @@ export default function GraphView({
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
             if (!sourceNode) return targetNode.y ?? 0;
-            
+
             // Calculate target radius
             const targetRadius = getNodeRadius(targetNode.id);
             const sx = sourceNode.x ?? 0;
             const sy = sourceNode.y ?? 0;
             const tx = targetNode.x ?? 0;
             const ty = targetNode.y ?? 0;
-            
+
             // Calculate angle
             const dx = sx - tx;
             const dy = sy - ty;
             const angle = Math.atan2(dy, dx);
-            
+
             // End line at edge of target node
-            return ty + (targetRadius * Math.sin(angle));
+            return ty + targetRadius * Math.sin(angle);
           });
 
         // ... rest of the existing code ...
 
         g.selectAll(".links text")
-          .attr("x", function(d: any): number {
+          .attr("x", function (d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -1092,7 +1238,7 @@ export default function GraphView({
             ) as D3Node | undefined;
             return ((sourceNode?.x ?? 0) + (targetNode?.x ?? 0)) / 2;
           })
-          .attr("y", function(d: any): number {
+          .attr("y", function (d: any): number {
             const sourceNode = nodeMap.get(
               typeof d.source === "object" ? d.source.id : d.source
             ) as D3Node | undefined;
@@ -1137,11 +1283,13 @@ export default function GraphView({
           if (onRelationshipSelected) {
             onRelationshipSelected(d);
           }
-          
+
           const t = d3.transition().duration(300);
           const { textColor } = getThemeColors();
-          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
-          const targetId = typeof d.target === "object" ? d.target.id : d.target;
+          const sourceId =
+            typeof d.source === "object" ? d.source.id : d.source;
+          const targetId =
+            typeof d.target === "object" ? d.target.id : d.target;
 
           // First dim ALL elements
           // Dim all nodes and circles
@@ -1150,32 +1298,33 @@ export default function GraphView({
             .attr("opacity", 0.15)
             .style("opacity", 0.15)
             .attr("stroke-width", 1);
-            
+
           // Forcefully dim ALL text elements with both attr and style
           g.selectAll(".nodes g .node-name-text")
             .transition(t)
             .attr("opacity", 0.08)
             .style("opacity", 0.08);
-            
+
           g.selectAll(".nodes g .node-type-text")
             .transition(t)
             .attr("opacity", 0.08)
             .style("opacity", 0.08);
-          
+
           // Dim all relationships
           g.selectAll(".links line")
             .transition(t)
             .attr("stroke-opacity", 0.15)
             .style("stroke-opacity", 0.15)
             .attr("stroke-width", 1);
-            
+
           g.selectAll(".links text")
             .transition(t)
             .attr("opacity", 0.1)
             .style("opacity", 0.1);
-          
+
           // Highlight this relationship line
-          const parentElement = (event.currentTarget as Element).parentNode as Element;
+          const parentElement = (event.currentTarget as Element)
+            .parentNode as Element;
           if (parentElement) {
             d3.select(parentElement)
               .select("line")
@@ -1184,7 +1333,7 @@ export default function GraphView({
               .style("stroke-opacity", 1)
               .attr("stroke-width", 2.5)
               .attr("stroke", textColor);
-              
+
             d3.select(parentElement)
               .select("text")
               .transition(t)
@@ -1196,27 +1345,30 @@ export default function GraphView({
 
           // Highlight the connected nodes
           g.selectAll(".nodes g")
-            .filter(function(nodeData: any) {
+            .filter(function (nodeData: any) {
               return nodeData.id === sourceId || nodeData.id === targetId;
             })
-            .each(function() {
+            .each(function () {
               const node = d3.select(this);
-              
+
               // Highlight circle
-              node.select(".node-circle")
+              node
+                .select(".node-circle")
                 .transition(t)
                 .attr("opacity", 0.9)
                 .style("opacity", 0.9)
                 .attr("stroke-width", 2);
-              
+
               // Highlight text - force with both attr and style
-              node.select(".node-name-text")
+              node
+                .select(".node-name-text")
                 .transition(t)
                 .attr("opacity", 0.8)
                 .style("opacity", 0.8)
                 .attr("fill", "#FFFFFF");
-                
-              node.select(".node-type-text")
+
+              node
+                .select(".node-type-text")
                 .transition(t)
                 .attr("opacity", 0.8)
                 .style("opacity", 0.8);
@@ -1267,11 +1419,13 @@ export default function GraphView({
           if (onRelationshipSelected) {
             onRelationshipSelected(d);
           }
-          
+
           const t = d3.transition().duration(300);
           const { textColor } = getThemeColors();
-          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
-          const targetId = typeof d.target === "object" ? d.target.id : d.target;
+          const sourceId =
+            typeof d.source === "object" ? d.source.id : d.source;
+          const targetId =
+            typeof d.target === "object" ? d.target.id : d.target;
 
           // First dim ALL elements
           // Dim all nodes and circles
@@ -1280,32 +1434,33 @@ export default function GraphView({
             .attr("opacity", 0.15)
             .style("opacity", 0.15)
             .attr("stroke-width", 1);
-            
+
           // Forcefully dim ALL text elements with both attr and style
           g.selectAll(".nodes g .node-name-text")
             .transition(t)
             .attr("opacity", 0.08)
             .style("opacity", 0.08);
-            
+
           g.selectAll(".nodes g .node-type-text")
             .transition(t)
             .attr("opacity", 0.08)
             .style("opacity", 0.08);
-          
+
           // Dim all relationships
           g.selectAll(".links line")
             .transition(t)
             .attr("stroke-opacity", 0.15)
             .style("stroke-opacity", 0.15)
             .attr("stroke-width", 1);
-            
+
           g.selectAll(".links text")
             .transition(t)
             .attr("opacity", 0.1)
             .style("opacity", 0.1);
-          
+
           // Highlight this relationship line
-          const parentElement = (event.currentTarget as Element).parentNode as Element;
+          const parentElement = (event.currentTarget as Element)
+            .parentNode as Element;
           if (parentElement) {
             d3.select(parentElement)
               .select("line")
@@ -1314,7 +1469,7 @@ export default function GraphView({
               .style("stroke-opacity", 1)
               .attr("stroke-width", 2.5)
               .attr("stroke", textColor);
-              
+
             d3.select(parentElement)
               .select("text")
               .transition(t)
@@ -1326,27 +1481,30 @@ export default function GraphView({
 
           // Highlight the connected nodes
           g.selectAll(".nodes g")
-            .filter(function(nodeData: any) {
+            .filter(function (nodeData: any) {
               return nodeData.id === sourceId || nodeData.id === targetId;
             })
-            .each(function() {
+            .each(function () {
               const node = d3.select(this);
-              
+
               // Highlight circle
-              node.select(".node-circle")
+              node
+                .select(".node-circle")
                 .transition(t)
                 .attr("opacity", 0.9)
                 .style("opacity", 0.9)
                 .attr("stroke-width", 2);
-              
+
               // Highlight text - force with both attr and style
-              node.select(".node-name-text")
+              node
+                .select(".node-name-text")
                 .transition(t)
                 .attr("opacity", 0.8)
                 .style("opacity", 0.8)
                 .attr("fill", "#FFFFFF");
-                
-              node.select(".node-type-text")
+
+              node
+                .select(".node-type-text")
                 .transition(t)
                 .attr("opacity", 0.8)
                 .style("opacity", 0.8);
@@ -1443,7 +1601,7 @@ export default function GraphView({
         .attr("y", "-50%")
         .attr("width", "200%")
         .attr("height", "200%");
-      
+
       // Add a stronger drop shadow for better readability against light backgrounds
       textShadowFilter
         .append("feDropShadow")
@@ -1455,34 +1613,40 @@ export default function GraphView({
 
       nodeElements
         .append("text")
-        .attr("class", "node-name-text")
-        .attr("font-size", (d: D3Node) => {
-          const radius = getNodeRadius(d.id);
-          // Scale font size based on node radius, capped for readability
-          // Reduced by 25% to fit better within the node
-          return Math.min(Math.max(radius * 0.3, 7), 10) + "px";
-        })
-        .attr("font-weight", "600")
-        .attr("dy", "-0.2em")
+        .attr("class", "node-label-text")
+        .attr("dy", 4)
         .attr("text-anchor", "middle")
-        .attr("fill", "#FFFFFF") // Always use white for all node labels
+        .attr("fill", (d: D3Node) => {
+          const color = nodeColors[d.label] || defaultColor;
+          return getContrastColor(color);
+        })
         .style("pointer-events", "none")
         .style("opacity", 0)
         .style("filter", "url(#text-shadow)")
+        .style("font-weight", "500")
         .each(function (d: D3Node) {
-          const name = d.properties?.name || `Node ${d.id}`;
+          // Get the preferred name from properties: first SIGLA, then nome, then name, then generic Node ID
+          const name =
+            d.properties?.SIGLA ||
+            d.properties?.sigla ||
+            d.properties?.nome ||
+            d.properties?.name ||
+            `Node ${d.id}`;
           const radius = getNodeRadius(d.id);
           const fontSize = Math.min(Math.max(radius * 0.3, 7), 10);
-          
+
           // Get SVG text element
           const textElement = d3.select(this);
-          
+
           // Calculate how many characters can fit per line based on radius
-          const charsPerLine = Math.max(Math.floor(radius * 1.6 / (fontSize * 0.6)), 5);
-          
+          const charsPerLine = Math.max(
+            Math.floor((radius * 1.6) / (fontSize * 0.6)),
+            5
+          );
+
           // Clear any existing content first
           textElement.text("");
-          
+
           // If name is short enough, just set it directly
           if (name.length <= charsPerLine) {
             textElement.text(name);
@@ -1490,30 +1654,32 @@ export default function GraphView({
             // Split text into two lines if needed
             const firstLine = name.substring(0, charsPerLine);
             let secondLine = "";
-            
+
             // If name is longer than what can fit in two lines, truncate with ellipsis
             if (name.length > charsPerLine * 2) {
-              secondLine = name.substring(charsPerLine, charsPerLine * 2 - 3) + "...";
+              secondLine =
+                name.substring(charsPerLine, charsPerLine * 2 - 3) + "...";
             } else {
               secondLine = name.substring(charsPerLine);
             }
-            
+
             // Add first line
-            textElement.append("tspan")
-                      .attr("x", 0)
-                      .attr("dy", "-0.6em")
-                      .text(firstLine);
-            
+            textElement
+              .append("tspan")
+              .attr("x", 0)
+              .attr("dy", "-0.6em")
+              .text(firstLine);
+
             // Add second line
-            textElement.append("tspan")
-                      .attr("x", 0)
-                      .attr("dy", "1.2em")
-                      .text(secondLine);
+            textElement
+              .append("tspan")
+              .attr("x", 0)
+              .attr("dy", "1.2em")
+              .text(secondLine);
           }
-          
+
           // Add title for tooltip
-          textElement.append("title")
-                    .text(name);
+          textElement.append("title").text(name);
         })
         .transition()
         .delay(600)
@@ -1540,50 +1706,54 @@ export default function GraphView({
       nodeElements.each(function (d: D3Node) {
         d3.select(this)
           .append("title")
-          .text(
-            () =>
-              `${d.properties?.name || `Node ${d.id}`} (${
-                d.label || "Unknown"
-              })`
-          );
+          .text(() => {
+            // Get the preferred name from properties with priority for SIGLA
+            const name =
+              d.properties?.SIGLA ||
+              d.properties?.sigla ||
+              d.properties?.nome ||
+              d.properties?.name ||
+              `Node ${d.id}`;
+            return `${name} (${d.label || "Unknown"})`;
+          });
       });
 
       nodeElements.on("click", (event: MouseEvent, clickedNode: D3Node) => {
         // Stop propagation and prevent default to ensure the SVG click handler doesn't fire
         event.stopPropagation();
         event.preventDefault();
-        
+
         console.log("Node clicked:", clickedNode.id);
-        
+
         const newlyConnected = getConnectedNodeIds(clickedNode.id);
-        
+
         // Reset relationship selection and edit states
         setSelectedRelationship(null);
         selectedRelationshipRef.current = null;
         setIsEditingRelationship(false);
-        
+
         // Set node selection
         setSelectedNode(clickedNode);
         selectedNodeRef.current = clickedNode;
         setConnectedNodes(newlyConnected);
         setShowCategorized(true);
         setIsEditing(false);
-        
+
         // Set view mode to selection
-        setViewMode('selection');
+        setViewMode("selection");
 
         if (onNodeSelected) {
           onNodeSelected(clickedNode);
         }
 
         const t = d3.transition().duration(300);
-        
+
         // Get theme colors directly to avoid dependency issues
         const isDarkTheme =
           resolvedTheme === "dark" ||
           document.documentElement.classList.contains("dark") ||
           document.documentElement.getAttribute("data-theme") === "dark";
-        
+
         const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
 
         // IMPORTANT: Create sets for faster lookup
@@ -1596,7 +1766,7 @@ export default function GraphView({
           .attr("opacity", 0.15)
           .style("opacity", 0.15)
           .attr("stroke-width", 1);
-        
+
         // Dim ALL text elements using direct selection and double styling
         // Use very low opacity (0.08) for better contrast with highlighted nodes
         g.selectAll(".nodes g .node-name-text")
@@ -1604,7 +1774,7 @@ export default function GraphView({
           .attr("opacity", 0.08)
           .style("opacity", 0.08)
           .attr("fill", "#FFFFFF"); // Keep white color but very dim
-        
+
         g.selectAll(".nodes g .node-type-text")
           .transition(t)
           .attr("opacity", 0.08)
@@ -1616,85 +1786,100 @@ export default function GraphView({
           .attr("stroke-opacity", 0.15)
           .style("stroke-opacity", 0.15)
           .attr("stroke-width", 1);
-        
+
         g.selectAll(".links text")
           .transition(t)
           .attr("opacity", 0.1)
           .style("opacity", 0.1);
-          
+
         // THEN highlight the selected node and its connected nodes
-        // Apply highlighting to selected node 
+        // Apply highlighting to selected node
         g.selectAll(".nodes g")
-          .filter(function(d: any) { return d.id === selectedNodeId; })
-          .each(function() {
+          .filter(function (d: any) {
+            return d.id === selectedNodeId;
+          })
+          .each(function () {
             const node = d3.select(this);
-            
+
             // Circle
-            node.select(".node-circle")
+            node
+              .select(".node-circle")
               .transition(t)
               .attr("opacity", 1)
               .style("opacity", 1) // Force with style too
               .attr("stroke-width", 2.5)
               .attr("stroke", textColor);
-              
+
             // Text elements - force with both attr and style
-            node.select(".node-name-text")
+            node
+              .select(".node-name-text")
               .transition(t)
               .attr("opacity", 1)
               .style("opacity", 1)
               .attr("fill", "#FFFFFF");
-              
-            node.select(".node-type-text")
+
+            node
+              .select(".node-type-text")
               .transition(t)
               .attr("opacity", 1)
               .style("opacity", 1);
           });
-          
+
         // Apply highlighting to connected nodes
         g.selectAll(".nodes g")
-          .filter(function(d: any) { return connectedNodeIds.has(d.id); })
-          .each(function() {
+          .filter(function (d: any) {
+            return connectedNodeIds.has(d.id);
+          })
+          .each(function () {
             const node = d3.select(this);
-            
+
             // Circle
-            node.select(".node-circle")
+            node
+              .select(".node-circle")
               .transition(t)
               .attr("opacity", 0.8)
               .style("opacity", 0.8)
               .attr("stroke-width", 1.5);
-              
+
             // Text elements - force with both attr and style
-            node.select(".node-name-text")
+            node
+              .select(".node-name-text")
               .transition(t)
               .attr("opacity", 0.7)
               .style("opacity", 0.7)
               .attr("fill", "#FFFFFF");
-              
-            node.select(".node-type-text")
+
+            node
+              .select(".node-type-text")
               .transition(t)
               .attr("opacity", 0.7)
               .style("opacity", 0.7);
           });
-          
+
         // Highlight related relationships
-        g.selectAll(".links g").each(function(d: any) {
+        g.selectAll(".links g").each(function (d: any) {
           const relationship = d3.select(this);
-          const sourceId = typeof d.source === "object" ? d.source.id : d.source;
-          const targetId = typeof d.target === "object" ? d.target.id : d.target;
-          
+          const sourceId =
+            typeof d.source === "object" ? d.source.id : d.source;
+          const targetId =
+            typeof d.target === "object" ? d.target.id : d.target;
+
           // Check if this relationship is connected to the selected node
-          const isRelated = (sourceId === selectedNodeId || targetId === selectedNodeId);
-          
+          const isRelated =
+            sourceId === selectedNodeId || targetId === selectedNodeId;
+
           if (isRelated) {
             // Highlight related relationship
-            relationship.select("line")
+            relationship
+              .select("line")
               .transition(t)
               .attr("stroke-opacity", 0.8)
               .style("stroke-opacity", 0.8)
               .attr("stroke-width", 2)
               .attr("stroke", textColor);
-            
-            relationship.select("text")
+
+            relationship
+              .select("text")
               .transition(t)
               .attr("opacity", 1)
               .style("opacity", 1)
@@ -1706,8 +1891,9 @@ export default function GraphView({
 
       // Create a transition for following svg operations
       const t = d3.transition().duration(300);
-      
-      svg.selectAll(".links text")
+
+      svg
+        .selectAll(".links text")
         .transition(t)
         .attr("fill", textColor)
         .attr("opacity", 0.7)
@@ -1739,7 +1925,7 @@ export default function GraphView({
       // Safely select elements and check if they exist before calling .attr
       const nodeNameEl = svg.select(".node-name-text").node();
       const linkTextEl = svg.select(".links text").node();
-      
+
       // Only update node name color if elements exist
       if (nodeNameEl) {
         svg.selectAll(".node-name-text").attr("fill", "#FFFFFF");
@@ -1747,7 +1933,9 @@ export default function GraphView({
 
       // Only update link text if elements exist
       if (linkTextEl) {
-        const currentLinkTextColor = linkTextEl ? d3.select(linkTextEl).attr("fill") : null;
+        const currentLinkTextColor = linkTextEl
+          ? d3.select(linkTextEl).attr("fill")
+          : null;
         if (!currentLinkTextColor || currentLinkTextColor !== textColor) {
           svg.selectAll(".links text").attr("fill", textColor);
         }
@@ -1755,12 +1943,12 @@ export default function GraphView({
 
       // Safely select and update other elements
       svg.selectAll(".node-type-text").attr("fill", mutedForegroundColor);
-      
+
       const arrowEl = svg.select("#arrow path").node();
       if (arrowEl) {
         svg.select("#arrow path").attr("fill", textColor);
       }
-      
+
       const linksEl = svg.selectAll(".links line").node();
       if (linksEl) {
         svg.selectAll(".links line").attr("stroke", linkColor);
@@ -1788,7 +1976,10 @@ export default function GraphView({
             try {
               updateThemeColors();
             } catch (err) {
-              console.error("Error updating theme colors on theme change:", err);
+              console.error(
+                "Error updating theme colors on theme change:",
+                err
+              );
             }
           }, 150);
           return () => clearTimeout(themeChangeTimeout);
@@ -1822,16 +2013,19 @@ export default function GraphView({
 
   const handleRelationshipUpdate = async (updatedRelationship: any) => {
     setIsEditingRelationship(false);
-    
+
     // Clear the selected relationship
     setSelectedRelationship(null);
 
     // If the relationship has a new ID (type was changed, which creates a new relationship in Neo4j)
-    if (updatedRelationship.oldId && updatedRelationship.id !== updatedRelationship.oldId) {
+    if (
+      updatedRelationship.oldId &&
+      updatedRelationship.id !== updatedRelationship.oldId
+    ) {
       // First remove the old relationship visually
       if (svgRef.current) {
         const oldRelationshipId = updatedRelationship.oldId;
-        
+
         // Remove the old relationship from the visualization
         d3.select(svgRef.current)
           .selectAll(".links line")
@@ -1840,7 +2034,7 @@ export default function GraphView({
           .duration(300)
           .style("opacity", 0)
           .remove();
-        
+
         d3.select(svgRef.current)
           .selectAll(".links text")
           .filter((d: any) => d.id === parseInt(oldRelationshipId, 10))
@@ -1849,7 +2043,7 @@ export default function GraphView({
           .style("opacity", 0)
           .remove();
       }
-      
+
       // Inform the parent component to refresh the graph data
       if (onRelationshipSelected) {
         onRelationshipSelected(null);
@@ -1858,7 +2052,7 @@ export default function GraphView({
       // Just a property update, update the selected relationship to reflect the changes
       if (selectedRelationship) {
         setSelectedRelationship(updatedRelationship);
-        
+
         // Update relationship type label in the visualization
         if (svgRef.current && selectedRelationship.id) {
           d3.select(svgRef.current)
@@ -1866,7 +2060,7 @@ export default function GraphView({
             .filter((d: any) => d.id === selectedRelationship.id)
             .text(updatedRelationship.type);
         }
-        
+
         if (onRelationshipSelected) {
           onRelationshipSelected(updatedRelationship);
         }
@@ -1879,7 +2073,7 @@ export default function GraphView({
     setIsEditingRelationship(false);
     // Clear the selected relationship
     setSelectedRelationship(null);
-    
+
     // Optionally, update the graph to remove the relationship visually
     // This could involve removing the relationship line from the D3 visualization
     if (svgRef.current) {
@@ -1888,10 +2082,10 @@ export default function GraphView({
         .selectAll(".links line")
         .filter((d: any) => d.id === relationshipId)
         .transition()
-        .duration (300)
+        .duration(300)
         .style("opacity", 0)
         .remove();
-      
+
       d3.select(svgRef.current)
         .selectAll(".links text")
         .filter((d: any) => d.id === relationshipId)
@@ -1901,17 +2095,17 @@ export default function GraphView({
         .remove();
     }
   };
-  
+
   const handleNodeDelete = async (deletedNode: any) => {
     // Close the edit form
     setIsEditing(false);
     // Clear the selected node
     setSelectedNode(null);
-    
+
     // Update the graph to remove the node visually
     if (svgRef.current) {
       const nodeId = deletedNode.id;
-      
+
       // Remove the node from the visualization
       d3.select(svgRef.current)
         .selectAll(".nodes g")
@@ -1920,7 +2114,7 @@ export default function GraphView({
         .duration(300)
         .style("opacity", 0)
         .remove();
-        
+
       // Also remove any connected relationships
       d3.select(svgRef.current)
         .selectAll(".links line")
@@ -1929,7 +2123,7 @@ export default function GraphView({
         .duration(300)
         .style("opacity", 0)
         .remove();
-        
+
       d3.select(svgRef.current)
         .selectAll(".links text")
         .filter((d: any) => d.source.id === nodeId || d.target.id === nodeId)
@@ -1938,7 +2132,7 @@ export default function GraphView({
         .style("opacity", 0)
         .remove();
     }
-    
+
     // Notify parent component
     if (onNodeSelected) {
       onNodeSelected(null);
@@ -1948,10 +2142,15 @@ export default function GraphView({
   // Update the search highlighting function
   useEffect(() => {
     // Exit early if nothing to do
-    if (!searchHighlight || !initialized || !svgRef.current || !data.nodes.length) {
+    if (
+      !searchHighlight ||
+      !initialized ||
+      !svgRef.current ||
+      !data.nodes.length
+    ) {
       // If search is cleared, update view mode only if we're in search mode
-      if (viewMode === 'search' && !searchHighlight) {
-        setViewMode('standard');
+      if (viewMode === "search" && !searchHighlight) {
+        setViewMode("standard");
         matchingNodeIdsRef.current = new Set();
       }
       return;
@@ -1968,12 +2167,13 @@ export default function GraphView({
     // Find matching node IDs
     const matchingNodeIds = new Set<number>();
 
-    data.nodes.forEach(node => {
-      const nodeName = String(node.properties?.name || '').toLowerCase();
+    data.nodes.forEach((node) => {
+      const nodeName = String(node.properties?.name || "").toLowerCase();
       if (nodeName.includes(searchTerm)) {
-        const nodeId = typeof node.id === "object" && node.id !== null 
-          ? node.id.low 
-          : Number(node.id);
+        const nodeId =
+          typeof node.id === "object" && node.id !== null
+            ? node.id.low
+            : Number(node.id);
         matchingNodeIds.add(nodeId);
       }
     });
@@ -1983,29 +2183,33 @@ export default function GraphView({
 
     // If no matching nodes, exit early
     if (matchingNodeIds.size === 0) {
-      setViewMode('standard');
+      setViewMode("standard");
       // Dispatch event to indicate no results were found
-      window.dispatchEvent(new CustomEvent('searchResultsCount', { 
-        detail: { count: 0, term: searchHighlight } 
-      }));
+      window.dispatchEvent(
+        new CustomEvent("searchResultsCount", {
+          detail: { count: 0, term: searchHighlight },
+        })
+      );
       return;
     }
 
     // Set view mode to search unless we're already in selection mode
-    if (viewMode !== 'selection') {
-      setViewMode('search');
+    if (viewMode !== "selection") {
+      setViewMode("search");
     }
 
     // Create an event to signal the count of matched nodes
-    window.dispatchEvent(new CustomEvent('searchResultsCount', { 
-      detail: { count: matchingNodeIds.size, term: searchHighlight } 
-    }));
+    window.dispatchEvent(
+      new CustomEvent("searchResultsCount", {
+        detail: { count: matchingNodeIds.size, term: searchHighlight },
+      })
+    );
 
     // Small delay to ensure D3 has finished rendering, then apply search highlighting
     setTimeout(() => {
       try {
         // Skip if we're already in selection mode (a node is selected)
-        if (viewMode === 'selection' || selectedNode) return;
+        if (viewMode === "selection" || selectedNode) return;
 
         // Get theme colors directly instead of using function from deps
         const isDarkTheme =
@@ -2014,12 +2218,13 @@ export default function GraphView({
           document.documentElement.getAttribute("data-theme") === "dark";
 
         const textColor = isDarkTheme ? "#FFFFFF" : "#0A0A0A";
-        
+
         // Use D3 to select elements for better control
         const svg = d3.select(svgEl);
-        
+
         // Setup zoom behavior that matches the original zoom behavior
-        const zoom = d3.zoom()
+        const zoom = d3
+          .zoom()
           .scaleExtent([0.1, 8])
           .on("zoom", (event) => {
             // Find the container group
@@ -2028,102 +2233,123 @@ export default function GraphView({
               g.attr("transform", event.transform);
             }
           });
-          
+
         // Make sure the SVG has zoom behavior
         svg.call(zoom as any);
-        
+
         // Calculate appropriate zoom level based on number of matches
         // More nodes = more zoomed out
-        const zoomScale = matchingNodeIds.size > 10 ? 0.3 : 
-                         matchingNodeIds.size > 5 ? 0.4 : 
-                         matchingNodeIds.size > 2 ? 0.5 : 0.7;
-                        
+        const zoomScale =
+          matchingNodeIds.size > 10
+            ? 0.3
+            : matchingNodeIds.size > 5
+            ? 0.4
+            : matchingNodeIds.size > 2
+            ? 0.5
+            : 0.7;
+
         // Use a smoother transition for better UX
-        svg.transition()
+        svg
+          .transition()
           .duration(850)
           .ease(d3.easeCubicOut)
           .call(
-            zoom.transform as any, 
-            d3.zoomIdentity.scale(zoomScale).translate(
-              window.innerWidth / 4, 
-              window.innerHeight / 4
-            )
+            zoom.transform as any,
+            d3.zoomIdentity
+              .scale(zoomScale)
+              .translate(window.innerWidth / 4, window.innerHeight / 4)
           );
-        
+
         // Remove any previous search indicators (avoid duplicates)
-        svg.selectAll('.search-indicator').remove();
-        
+        svg.selectAll(".search-indicator").remove();
+
         // Create transitions for all elements (same as in click handler)
         const t = d3.transition().duration(300);
-        
+
         // First, dim all nodes with transitions
-        svg.selectAll('.nodes g .node-circle')
+        svg
+          .selectAll(".nodes g .node-circle")
           .transition(t)
-          .attr('opacity', 0.15)
-          .style('opacity', 0.15)
-          .attr('stroke-width', 1);
-        
+          .attr("opacity", 0.15)
+          .style("opacity", 0.15)
+          .attr("stroke-width", 1);
+
         // Dim ALL text elements using transitions and the same approach as click handler
-        svg.selectAll('.nodes g .node-name-text')
+        svg
+          .selectAll(".nodes g .node-name-text")
           .transition(t)
-          .attr('opacity', 0.08)
-          .style('opacity', 0.08)
-          .attr('fill', '#FFFFFF'); // Keep white color but very dim
-        
-        svg.selectAll('.nodes g .node-type-text')
+          .attr("opacity", 0.08)
+          .style("opacity", 0.08)
+          .attr("fill", "#FFFFFF"); // Keep white color but very dim
+
+        svg
+          .selectAll(".nodes g .node-type-text")
           .transition(t)
-          .attr('opacity', 0.08)
-          .style('opacity', 0.08);
-        
+          .attr("opacity", 0.08)
+          .style("opacity", 0.08);
+
         // Dim relationships with transitions
-        svg.selectAll('.links line')
+        svg
+          .selectAll(".links line")
           .transition(t)
-          .attr('stroke-opacity', 0.15)
-          .style('stroke-opacity', 0.15)
-          .attr('stroke-width', 1);
-        
-        svg.selectAll('.links text')
+          .attr("stroke-opacity", 0.15)
+          .style("stroke-opacity", 0.15)
+          .attr("stroke-width", 1);
+
+        svg
+          .selectAll(".links text")
           .transition(t)
-          .attr('opacity', 0.1)
-          .style('opacity', 0.1);
-        
+          .attr("opacity", 0.1)
+          .style("opacity", 0.1);
+
         // Highlight matching nodes with transitions
-        svg.selectAll('.nodes g')
-          .filter(function() {
-            const nodeId = Number(d3.select(this).attr('data-id'));
+        svg
+          .selectAll(".nodes g")
+          .filter(function () {
+            const nodeId = Number(d3.select(this).attr("data-id"));
             return matchingNodeIds.has(nodeId);
           })
-          .each(function() {
+          .each(function () {
             const node = d3.select(this);
-            
+
             // Highlight the circle
-            node.select('.node-circle')
+            node
+              .select(".node-circle")
               .transition(t)
-              .attr('opacity', 1)
-              .style('opacity', 1)
-              .attr('stroke-width', 2.5)
-              .attr('stroke', textColor);
-            
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("stroke-width", 2.5)
+              .attr("stroke", textColor);
+
             // Highlight name text with better forced visibility
-            node.select('.node-name-text')
+            node
+              .select(".node-name-text")
               .transition(t)
-              .attr('opacity', 1)
-              .style('opacity', 1)
-              .attr('fill', '#FFFFFF');
-            
+              .attr("opacity", 1)
+              .style("opacity", 1)
+              .attr("fill", "#FFFFFF");
+
             // Highlight type text
-            node.select('.node-type-text')
+            node
+              .select(".node-type-text")
               .transition(t)
-              .attr('opacity', 1)
-              .style('opacity', 1);
+              .attr("opacity", 1)
+              .style("opacity", 1);
           });
-        
       } catch (error) {
         console.error("Error applying search highlighting:", error);
       }
     }, 100);
-
-  }, [searchHighlight, initialized, svgRef, data.nodes, selectedNode, selectedRelationship, viewMode, resolvedTheme]);
+  }, [
+    searchHighlight,
+    initialized,
+    svgRef,
+    data.nodes,
+    selectedNode,
+    selectedRelationship,
+    viewMode,
+    resolvedTheme,
+  ]);
 
   return (
     <div className="flex flex-col h-full w-full relative isolate">
@@ -2143,11 +2369,11 @@ export default function GraphView({
       />
 
       {selectedNode && (
-        <div 
+        <div
           className="absolute bottom-5 right-5 p-4 bg-card text-card-foreground shadow-xl rounded-lg max-w-md w-full sm:w-auto border border-border transition-all duration-300 ease-in-out transform-gpu motion-safe:animate-fadeInUp"
-          style={{ 
-            zIndex: selectedRelationship ? 20 : 30, 
-            display: selectedRelationship ? 'none' : 'block'
+          style={{
+            zIndex: selectedRelationship ? 20 : 30,
+            display: selectedRelationship ? "none" : "block",
           }}
         >
           {!isEditing ? (
@@ -2258,9 +2484,9 @@ export default function GraphView({
           className={`absolute bottom-0 right-0 mb-8 mr-8 w-80 p-4 bg-card border rounded-lg shadow-lg transition-all duration-300 ${
             isSidebarOpen ? "opacity-0 pointer-events-none" : "opacity-100"
           }`}
-          style={{ 
+          style={{
             zIndex: selectedNode ? 20 : 30,
-            display: selectedNode ? 'none' : 'block'
+            display: selectedNode ? "none" : "block",
           }}
         >
           {isEditingRelationship ? (
@@ -2312,46 +2538,60 @@ export default function GraphView({
                   </button>
                 </div>
               </div>
-              
+
               <div className="mb-4 p-3 bg-muted rounded-md">
-                <div className="text-xs uppercase text-muted-foreground mb-1">Tipo</div>
+                <div className="text-xs uppercase text-muted-foreground mb-1">
+                  Tipo
+                </div>
                 <div className="font-medium">{selectedRelationship.type}</div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="p-3 bg-muted rounded-md">
-                  <div className="text-xs uppercase text-muted-foreground mb-1">De</div>
+                  <div className="text-xs uppercase text-muted-foreground mb-1">
+                    De
+                  </div>
                   <div className="font-medium truncate">
-                    {typeof selectedRelationship.source === "object" 
-                      ? selectedRelationship.source.properties?.name || `Node ID: ${selectedRelationship.source.id}` 
+                    {typeof selectedRelationship.source === "object"
+                      ? selectedRelationship.source.properties?.name ||
+                        `Node ID: ${selectedRelationship.source.id}`
                       : `Node ID: ${selectedRelationship.source}`}
                   </div>
                 </div>
                 <div className="p-3 bg-muted rounded-md">
-                  <div className="text-xs uppercase text-muted-foreground mb-1">Para</div>
+                  <div className="text-xs uppercase text-muted-foreground mb-1">
+                    Para
+                  </div>
                   <div className="font-medium truncate">
-                    {typeof selectedRelationship.target === "object" 
-                      ? selectedRelationship.target.properties?.name || `Node ID: ${selectedRelationship.target.id}` 
+                    {typeof selectedRelationship.target === "object"
+                      ? selectedRelationship.target.properties?.name ||
+                        `Node ID: ${selectedRelationship.target.id}`
                       : `Node ID: ${selectedRelationship.target}`}
                   </div>
                 </div>
               </div>
-              
+
               <div className="space-y-3">
                 <h4 className="text-sm font-medium">Propriedades</h4>
-                
-                {Object.keys(selectedRelationship.properties || {}).length > 0 ? (
+
+                {Object.keys(selectedRelationship.properties || {}).length >
+                0 ? (
                   <div className="space-y-2">
-                    {Object.entries(selectedRelationship.properties || {}).map(([key, value]) => (
-                      <div key={key} className="grid grid-cols-3 gap-2 text-sm">
-                        <div className="text-muted-foreground capitalize">
-                          {key.replace(/_/g, " ")}:
+                    {Object.entries(selectedRelationship.properties || {}).map(
+                      ([key, value]) => (
+                        <div
+                          key={key}
+                          className="grid grid-cols-3 gap-2 text-sm"
+                        >
+                          <div className="text-muted-foreground capitalize">
+                            {key.replace(/_/g, " ")}:
+                          </div>
+                          <div className="col-span-2 font-mono break-all">
+                            {formatValue(value)}
+                          </div>
                         </div>
-                        <div className="col-span-2 font-mono break-all">
-                          {formatValue(value)}
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    )}
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground italic">

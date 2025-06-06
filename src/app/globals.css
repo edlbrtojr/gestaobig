@@ -3,6 +3,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Classes de fontes personalizadas */
+.font-nordic {
+  font-family: var(--font-nordic, ui-serif, Georgia, Cambria, "Times New Roman", Times, serif);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 /* Modern color scheme - Light theme (default) */
 :root {
   --background: oklch(0.985 0.01 var(--p, 0));
@@ -58,6 +66,9 @@
   --sidebar-accent-foreground: oklch(0.28 0.12 var(--p, 250));
   --sidebar-border: oklch(0.92 0.015 var(--p, 240));
   --sidebar-ring: oklch(0.7 0.1 var(--p, 250));
+  
+  /* Sidebar width customizations */
+  --sidebar-collapsed-width: 4rem; /* Default is 4rem, increased by 20% */
 }
 
 /* Theme transition handling - for next-themes */
@@ -345,8 +356,20 @@ body {
 }
 
 @keyframes shine {
-  to {
-    transform: translateX(200%);
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 100% 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
   }
 }
 
@@ -370,6 +393,11 @@ body {
   }
 }
 
+/* Custom sidebar width when collapsed */
+[data-state="collapsed"] {
+  width: var(--sidebar-collapsed-width) !important;
+}
+
 /* Add this CSS to target the sidebar trigger icon and make it smaller */
 [data-sidebar="trigger"] svg {
   height: 1.25rem;
@@ -380,11 +408,45 @@ body {
 [data-state="collapsed"] [data-sidebar="menu-button"] {
   justify-content: center !important;
   width: 100%;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 [data-state="collapsed"] [data-sidebar="menu-button"] > * {
   display: flex;
   justify-content: center;
+}
+
+/* Make sure icons are visible in collapsed state */
+[data-state="collapsed"] [data-sidebar="menu-button"] svg {
+  height: 1.5rem; /* 20% larger than 1.25rem */
+  width: 1.5rem; /* 20% larger than 1.25rem */
+  margin: 0;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Hide text in collapsed state */
+[data-state="collapsed"] [data-sidebar="menu-button"] span {
+  display: none !important;
+}
+
+/* Logo container adjustments for collapsed state */
+[data-state="collapsed"] [data-sidebar="logo-container"] {
+  padding: 0 !important;
+  justify-content: center !important;
+}
+
+/* Logo size adjustments in collapsed state */
+[data-state="collapsed"] [data-sidebar="logo-container"] > div {
+  width: calc(var(--sidebar-collapsed-width) - 1rem) !important;
+  height: 32px !important;
+}
+
+/* Make sure logo images are centered in collapsed state */
+[data-state="collapsed"] [data-sidebar="logo-container"] img {
+  object-position: center !important;
 }
 
 /* Center active highlight on sidebar buttons */
@@ -408,4 +470,93 @@ body {
 /* Fix any potential issues with text visibility */
 [data-sidebar="menu-button"] > a > span {
   display: inline-block;
+}
+
+/* Logo animation classes */
+@keyframes slideUpIn {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideUpOut {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+
+.animate-slide-up-in {
+  animation: slideUpIn 0.5s ease forwards;
+}
+
+.animate-slide-up-out {
+  animation: slideUpOut 0.5s ease forwards;
+}
+
+/* Animações de transição de página */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Classes utilitárias para transições */
+.page-transition-fade {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.page-transition-slide-up {
+  animation: slideInUp 0.5s ease-out;
+}
+
+.page-transition-slide-down {
+  animation: slideInDown 0.5s ease-out;
+}
+
+/* Estilos para a transição do componente de carregamento */
+.loading-fade {
+  transition: opacity 0.5s ease-out;
+}
+
+.loading-visible {
+  opacity: 1;
+}
+
+.loading-hidden {
+  opacity: 0;
 }

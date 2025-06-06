@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 export async function updateOrganizationConfig() {
   try {
     const result = await db.run(`
-      MERGE (org:Organization)
+      MERGE (org:_inAppOrgConfig)
       SET org.name = "Federação das Indústrias do Estado do Acre",
           org.shortName = "FIEAC",
           org.logoUrl = "/uploads/4072219a-04e7-4c79-9428-dc6e5169f574.png",
@@ -28,10 +28,10 @@ export async function updateOrganizationConfig() {
       })
     });
 
-    console.log("Organization config updated successfully");
+    console.log("Application settings updated successfully");
     return true;
   } catch (error) {
-    console.error("Error updating organization config:", error);
+    console.error("Error updating application settings:", error);
     return false;
   }
 } 

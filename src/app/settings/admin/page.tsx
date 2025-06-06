@@ -3,7 +3,7 @@ import AdminConfigForm from "./admin-config-form";
 
 export default function AdminSettingsPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h3 className="text-lg font-medium">Configurações de Administrador</h3>
         <p className="text-sm text-muted-foreground">

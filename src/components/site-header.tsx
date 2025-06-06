@@ -6,8 +6,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import ThemeToggle from "@/components/theme-toggle";
-import { ConnectionStatus } from "@/components/ui/ConnectionStatus";
-import { UserSwitcher } from "@/components/user-switcher";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -18,7 +16,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useTheme } from "./theme-provider";
-import { useOrgConfig } from "@/contexts/org-config-provider";
+import { siteConfig } from "@/config/site";
 
 interface SiteHeaderProps {
   breadcrumbs?: React.ReactNode;
@@ -26,7 +24,6 @@ interface SiteHeaderProps {
 
 export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
   const { theme } = useTheme();
-  const { config } = useOrgConfig();
   const pathname = usePathname();
 
   // Function to generate breadcrumbs based on pathname
@@ -85,8 +82,8 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
   };
 
   // Get the appropriate logos
-  const lightLogo = config?.theme?.lightLogo || "/images/logo-fieac-azul.png";
-  const darkLogo = config?.theme?.darkLogo || "/images/logo-fieac-branco.png";
+  const lightLogo = siteConfig.theme.lightLogo;
+  const darkLogo = siteConfig.theme.darkLogo;
 
   return (
     <header className="sticky top-0 z-40 w-full h-10 border-b border-border/40 bg-background">
@@ -100,7 +97,7 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
             <div className="relative h-8 w-32">
               <Image
                 src={lightLogo}
-                alt={config?.name || "Organization Logo"}
+                alt="Organization Logo"
                 className="dark:hidden"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
@@ -108,7 +105,7 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
               />
               <Image
                 src={darkLogo}
-                alt={config?.name || "Organization Logo"}
+                alt="Organization Logo"
                 className="hidden dark:block"
                 fill
                 style={{ objectFit: "contain", objectPosition: "left" }}
@@ -124,9 +121,7 @@ export function SiteHeader({ breadcrumbs }: SiteHeaderProps) {
         </div>
 
         <div className="flex items-center gap-3">
-          <ConnectionStatus />
           <ThemeToggle />
-          <UserSwitcher />
         </div>
       </div>
     </header>

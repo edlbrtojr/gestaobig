@@ -8,7 +8,6 @@ import { Expand, Shrink, SlidersHorizontal, X } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import Image from "next/image";
 import FilterControls, { FilterState } from "./filter-controls";
-import { useOrgConfig } from "@/contexts/org-config-provider";
 
 interface GraphContainerProps {
   data: GraphData;
@@ -38,14 +37,12 @@ const GraphContainer = memo(
     const timeRef = useRef<number>(0);
     const dotsRef = useRef<Array<{ baseX: number; baseY: number }>>([]);
     const { theme, setTheme } = useTheme();
-    const { config } = useOrgConfig();
     const [searchResults, setSearchResults] = useState<{count: number, term: string} | null>(null);
     const [noResultsMessage, setNoResultsMessage] = useState<string | null>(null);
     
-    // Get the appropriate logos from organization config
-    const lightLogo = config?.theme?.lightLogo || "/images/logo-fieac-azul.png";
-    const darkLogo = config?.theme?.darkLogo || "/images/logo-fieac-branco.png";
-    const orgName = config?.shortName || "FIEAC";
+    const lightLogo = "/images/logo-fieac-azul.png";
+    const darkLogo = "/images/logo-Sitema%20fieac-branco.png";
+    const orgName = "FIEAC";
 
     // Handle filter changes in fullscreen mode
     const handleFilterChange = (filters: FilterState) => {

@@ -1,14 +1,14 @@
 "use client";
 
-import { createContext, useContext, ReactNode, useEffect, useState } from "react";
-import { OrganizationConfig } from "@/app/api/config/route";
+import { createContext, useContext, ReactNode, useState } from 'react';
+import { OrganizationConfig } from '@/app/api/config/route';
 
-// Default configuration
+// Configuração padrão
 const defaultConfig: OrganizationConfig = {
-  name: "Sistema FIEAC",
+  name: "Federação das Indústrias do Estado do Acre",
   shortName: "FIEAC",
-  logoUrl: "/uploads/4072219a-04e7-4c79-9428-dc6e5169f574.png",
-  logoSmallUrl: "/uploads/8af51858-0543-424d-8d59-ba57c1ede5a1.png",
+  logoUrl: "/images/logo-fieac-azul.png",
+  logoSmallUrl: "/images/logo-fieac-icon.png",
   faviconUrl: "/favicon.ico",
   primaryColor: "#004a93",
   secondaryColor: "#f4791f",
@@ -20,101 +20,97 @@ const defaultConfig: OrganizationConfig = {
   theme: {
     defaultMode: "light",
     enableSystem: true,
-    lightLogo: "/uploads/4072219a-04e7-4c79-9428-dc6e5169f574.png",
-    darkLogo: "/uploads/8af51858-0543-424d-8d59-ba57c1ede5a1.png",
-  },
+    lightLogo: "/images/logo-fieac-azul.png",
+    darkLogo: "/images/logo-Sitema%20fieac-branco.png",
+  }
 };
 
-// Create context
-type OrgConfigContextType = {
-  config: OrganizationConfig;
+// Criar contexto com valor padrão
+const OrgConfigContext = createContext<{
+  config: OrganizationConfig | null;
   isLoading: boolean;
   error: Error | null;
   refreshConfig: () => Promise<void>;
-};
-
-const OrgConfigContext = createContext<OrgConfigContextType>({
+  saveConfig: (newConfig: OrganizationConfig) => Promise<boolean>;
+}>({
   config: defaultConfig,
-  isLoading: true,
+  isLoading: false,
   error: null,
   refreshConfig: async () => {},
+  saveConfig: async () => false,
 });
 
-// Hook for using the org config context
-export const useOrgConfig = () => useContext(OrgConfigContext);
-
-// Provider component
-interface OrgConfigProviderProps {
-  children: ReactNode;
-  initialConfig?: OrganizationConfig;
-}
-
-export function OrgConfigProvider({
-  children,
-  initialConfig,
-}: OrgConfigProviderProps) {
-  const [config, setConfig] = useState<OrganizationConfig>(initialConfig || defaultConfig);
-  const [isLoading, setIsLoading] = useState<boolean>(!initialConfig);
+// Hook para usar a configuração da organização
+export function useOrgConfig() {
+  const [config, setConfig] = useState<OrganizationConfig>(defaultConfig);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-
-  // Apply CSS variables based on config
-  useEffect(() => {
-    if (!config) return;
-
-    const root = document.documentElement;
-    root.style.setProperty("--primary", config.primaryColor);
-    root.style.setProperty("--secondary", config.secondaryColor);
-    root.style.setProperty("--tertiary", config.tertiaryColor);
-
-    // Update favicon if available
-    if (config.faviconUrl) {
-      const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
-      if (link) {
-        link.href = config.faviconUrl;
-      } else {
-        const newLink = document.createElement("link");
-        newLink.rel = "icon";
-        newLink.href = config.faviconUrl;
-        document.head.appendChild(newLink);
-      }
-    }
-  }, [config]);
-
-  // Fetch config from API
-  const fetchConfig = async () => {
-    if (initialConfig) return; // Skip fetch if initialConfig was provided
-
+  
+  // Função para atualizar a configuração
+  const refreshConfig = async (): Promise<void> => {
     setIsLoading(true);
-    setError(null);
-    
     try {
-      const response = await fetch("/api/config");
-      if (!response.ok) {
-        throw new Error("Failed to fetch organization configuration");
-      }
-
-      const data = await response.json();
+      const res = await fetch('/api/config');
+      if (!res.ok) throw new Error('Failed to fetch config');
+      const data = await res.json();
       setConfig(data);
     } catch (err) {
-      console.error("Error fetching organization config:", err);
-      setError(err instanceof Error ? err : new Error("Unknown error"));
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
     }
   };
-
-  // Initial fetch
-  useEffect(() => {
-    fetchConfig();
-  }, []);
-
-  // Function to refresh config
-  const refreshConfig = async () => {
-    await fetchConfig();
+  
+  // Função para salvar a configuração
+  const saveConfig = async (newConfig: OrganizationConfig): Promise<boolean> => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConfig),
+      });
+      if (!res.ok) throw new Error('Failed to save config');
+      setConfig(newConfig);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
   };
+  
+  return {
+    config,
+    isLoading,
+    error,
+    refreshConfig,
+    saveConfig,
+  };
+}
 
+// Hook para usar o contexto de configuração da organização
+export function useOrganizationConfig() {
+  const context = useContext(OrgConfigContext);
+  
+  if (!context) {
+    throw new Error('useOrganizationConfig must be used within an OrgConfigProvider');
+  }
+  
+  return context;
+}
+
+interface OrgConfigProviderProps {
+  children: ReactNode;
+}
+
+// Provedor de configuração da organização
+export function OrgConfigProvider({ children }: OrgConfigProviderProps) {
+  const orgConfig = useOrgConfig();
+  
   return (
-    <OrgConfigContext.Provider value={{ config, isLoading, error, refreshConfig }}>
+    <OrgConfigContext.Provider value={orgConfig}>
       {children}
     </OrgConfigContext.Provider>
   );

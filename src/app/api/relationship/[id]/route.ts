@@ -19,8 +19,17 @@ export async function GET(
     // Get relationship ID from params safely
     const id = String(params.id);
 
-    // Get a session from our singleton driver
-    const session = getDriver().session();
+    // Get driver instance and then get a session from it
+    const driver = await getDriver();
+    if (!driver) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
+
+    // Create a session from the driver
+    const session = driver.session();
 
     try {
       // Create the Cypher query to fetch the relationship with source and target node names
@@ -120,8 +129,17 @@ export async function PUT(
       );
     }
 
-    // Get a session from our singleton driver
-    const session = getDriver().session();
+    // Get driver instance and then get a session from it
+    const driver = await getDriver();
+    if (!driver) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
+
+    // Create a session from the driver
+    const session = driver.session();
 
     try {
       // In Neo4j, we need to delete the old relationship and create a new one with the new type
@@ -161,7 +179,7 @@ export async function PUT(
         RETURN newRel, id(newRel) as newId
       `;
 
-      const updateResult = await session.writeTransaction((tx) => {
+      const updateResult = await session.writeTransaction(tx => {
         return tx.run(updateTypeQuery, {
           relationshipId: neo4j.int(id)
         });
@@ -213,12 +231,21 @@ export async function DELETE(
     // Get relationship ID from params safely
     const id = String(params.id);
 
-    // Get a session from our singleton driver
-    const session = getDriver().session();
+    // Get driver instance and then get a session from it
+    const driver = await getDriver();
+    if (!driver) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
+
+    // Create a session from the driver
+    const session = driver.session();
 
     try {
       // Delete the relationship
-      const result = await session.executeWrite((tx) => {
+      const result = await session.executeWrite(tx => {
         const query = `
           MATCH ()-[r]-() 
           WHERE id(r) = $relationshipId

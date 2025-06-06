@@ -1,22 +1,19 @@
 "use client";
 
 import { ReactNode } from "react";
-import { useOrganizationConfig } from "@/components/org-config-provider";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
-import { Toaster } from "@/components/ui/sonner";
 import { ThemeTransitionObserver } from "@/components/theme-transition-observer";
 import { ThemeCSSVariables } from "@/components/theme-css-variables";
 import { DynamicFavicon } from "@/components/dynamic-favicon";
+import { siteConfig } from "@/config/site";
 
 interface BodyContentProps {
   children: ReactNode;
 }
 
 export function BodyContent({ children }: BodyContentProps) {
-  const { config } = useOrganizationConfig();
-  
   return (
     <>
       <DynamicFavicon />
@@ -31,10 +28,9 @@ export function BodyContent({ children }: BodyContentProps) {
             </main>
           </SidebarInset>
         </div>
-        <Toaster />
         <ThemeTransitionObserver />
       </SidebarProvider>
-      <ThemeCSSVariables orgConfig={config} />
+      <ThemeCSSVariables orgConfig={siteConfig} />
     </>
   );
 } 

@@ -135,14 +135,20 @@ export default function NodeEditForm({
       const fetchProperties = async () => {
         try {
           const properties = await getNodeProperties(node.label);
+          if (!properties || properties.length === 0) {
+            throw new Error(`No properties defined for node type: ${node.label}`);
+          }
           setNodeProperties(properties);
         } catch (error) {
           console.error("Error loading node properties:", error);
           setNodeProperties([]);
+          setError(`Failed to load properties for ${node.label}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       };
       
       fetchProperties();
+    } else {
+      setError("Invalid node: missing label");
     }
   }, [node]);
 
@@ -242,7 +248,7 @@ export default function NodeEditForm({
       });
 
       if (!response.ok) {
-        throw new Error("Failed to update node");
+        throw new Error("Falha ao atualizar nó");
       }
 
       const updatedNode = await response.json();
@@ -251,7 +257,7 @@ export default function NodeEditForm({
     } catch (error) {
       console.error("Error updating node:", error);
       setError(
-        error instanceof Error ? error.message : "Failed to update node"
+        error instanceof Error ? error.message : "Falha ao atualizar nó"
       );
       setIsSubmitting(false);
     }
@@ -293,14 +299,14 @@ export default function NodeEditForm({
         if (contentType && contentType.includes("application/json")) {
           try {
             const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to delete node");
+            throw new Error(errorData.error || "Falha ao excluir nó");
           } catch (parseError) {
             // If JSON parsing fails, use status text
-            throw new Error(`Failed to delete node: ${response.statusText}`);
+            throw new Error(`Falha ao excluir nó: ${response.statusText}`);
           }
         } else {
           // No JSON content
-          throw new Error(`Failed to delete node: ${response.statusText}`);
+          throw new Error(`Falha ao excluir nó: ${response.statusText}`);
         }
       }
 
@@ -311,7 +317,7 @@ export default function NodeEditForm({
     } catch (error) {
       console.error("Error deleting node:", error);
       setError(
-        error instanceof Error ? error.message : "Failed to delete node"
+        error instanceof Error ? error.message : "Falha ao excluir nó"
       );
       setIsDeleting(false);
     }
@@ -328,7 +334,7 @@ export default function NodeEditForm({
         if (propDef.type === 'date') return 'date';
         if (propDef.type === 'enum') return 'select';
         if (propDef.type === 'boolean') return 'checkbox';
-        if (propDef.type === 'string' && (propertyName === 'description' || formatValueForEditing(value).length > 50)) {
+        if (propDef.type === 'string' && (propertyName === 'descricao' || formatValueForEditing(value).length > 50)) {
           return 'textarea';
         }
         return 'text';
@@ -359,12 +365,49 @@ export default function NodeEditForm({
     return [];
   };
 
+  // Get a human-readable label for the node type
+  const getNodeTypeLabel = (label: string) => {
+    const labelMap: Record<string, string> = {
+      'Empresa': 'Empresa',
+      'Unidade': 'Unidade',
+      'Missao': 'Missão',
+      'Visao': 'Visão',
+      'Proposito': 'Propósito',
+      'Negocio': 'Negócio',
+      'SistemaApoio': 'Sistema de Apoio'
+    };
+    
+    return labelMap[label] || label;
+  };
+
+  // Translate property names to human-readable form
+  const getPropertyLabel = (name: string) => {
+    const labelMap: Record<string, string> = {
+      'nome': 'Nome',
+      'descricao': 'Descrição',
+      'data': 'Data',
+      'status': 'Status',
+      'prioridade': 'Prioridade',
+      'responsavel': 'Responsável',
+      'setor': 'Setor',
+      'area': 'Área',
+      'objetivo': 'Objetivo'
+    };
+    
+    return labelMap[name] || name.replace(/_/g, " ");
+  };
+
   return (
     <>
       <form
         onSubmit={handleSubmit}
         className="space-y-4 max-h-[calc(100vh-250px)] overflow-y-auto pr-2 w-80"
       >
+        <div className="mb-4 bg-muted p-3 rounded-md">
+          <div className="text-xs uppercase text-muted-foreground mb-1">Tipo</div>
+          <div className="font-medium">{getNodeTypeLabel(node.label)}</div>
+        </div>
+        
         <div className="space-y-4 pl-2">
           {Object.entries(editedProperties).map(([key, value]) => {
             const formattedValue = formatValueForEditing(value);
@@ -374,7 +417,7 @@ export default function NodeEditForm({
             return (
               <div key={key} className="space-y-2">
                 <Label htmlFor={key} className="text-sm font-medium capitalize">
-                  {key.replace(/_/g, " ")}
+                  {getPropertyLabel(key)}
                 </Label>
 
                 {inputType === 'textarea' ? (
@@ -420,7 +463,7 @@ export default function NodeEditForm({
                       disabled={isSubmitting}
                     />
                     <label htmlFor={key} className="text-sm text-gray-700 dark:text-gray-300">
-                      {value === true || value === 'true' ? 'Yes' : 'No'}
+                      {value === true || value === 'true' ? 'Sim' : 'Não'}
                     </label>
                   </div>
                 ) : (
@@ -467,11 +510,11 @@ export default function NodeEditForm({
               disabled={isSubmitting}
             >
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              Cancelar
             </Button>
             <Button type="submit" size="sm" disabled={isSubmitting}>
               <Save className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Saving..." : "Save Changes"}
+              {isSubmitting ? "Salvando..." : "Salvar Alterações"}
             </Button>
           </div>
         </div>
@@ -481,9 +524,9 @@ export default function NodeEditForm({
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogTitle>Descartar alterações?</DialogTitle>
             <DialogDescription>
-              You have unsaved changes. Are you sure you want to discard them?
+              Você tem alterações não salvas. Tem certeza que deseja descartá-las?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -491,10 +534,10 @@ export default function NodeEditForm({
               variant="outline"
               onClick={() => setShowCancelDialog(false)}
             >
-              Continue Editing
+              Continuar Editando
             </Button>
             <Button variant="destructive" onClick={confirmCancel}>
-              Discard Changes
+              Descartar Alterações
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -504,13 +547,13 @@ export default function NodeEditForm({
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Changes Saved</DialogTitle>
+            <DialogTitle>Alterações Salvas</DialogTitle>
             <DialogDescription>
-              Your changes have been saved successfully.
+              Suas alterações foram salvas com sucesso.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={confirmSave}>Close</Button>
+            <Button onClick={confirmSave}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -522,9 +565,9 @@ export default function NodeEditForm({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogTitle>Descartar alterações?</DialogTitle>
             <DialogDescription>
-              You have unsaved changes. Are you sure you want to exit?
+              Você tem alterações não salvas. Tem certeza que deseja sair?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -532,7 +575,7 @@ export default function NodeEditForm({
               variant="outline"
               onClick={() => setShowExitConfirmation(false)}
             >
-              Continue Editing
+              Continuar Editando
             </Button>
             <Button
               variant="destructive"
@@ -541,7 +584,7 @@ export default function NodeEditForm({
                 onCancel();
               }}
             >
-              Exit Without Saving
+              Sair Sem Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -551,10 +594,11 @@ export default function NodeEditForm({
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this node? This action cannot be undone.
-              {node.label === 'Person' && <p className="mt-2 text-red-500">Warning: Deleting a person will also delete all their relationships.</p>}
+              Tem certeza que deseja excluir este nó? Esta ação não pode ser desfeita e também
+              removerá todos os relacionamentos associados a este nó.
+              {node.label === 'Empresa' && <p className="mt-2 text-red-500">Atenção: Excluir uma empresa removerá todas as suas unidades e relacionamentos.</p>}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -563,14 +607,14 @@ export default function NodeEditForm({
               onClick={() => setShowDeleteDialog(false)}
               disabled={isDeleting}
             >
-              Cancel
+              Cancelar
             </Button>
             <Button 
               variant="destructive" 
               onClick={handleDelete}
               disabled={isDeleting}
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? "Excluindo..." : "Excluir"}
             </Button>
           </DialogFooter>
         </DialogContent>

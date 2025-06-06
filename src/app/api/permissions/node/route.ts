@@ -56,14 +56,18 @@ export async function GET(request: Request) {
         RETURN 
           v.nodeId AS nodeId, 
           v.isRestricted AS isRestricted,
-          labels(n) AS labels,
-          n.name AS name,
-          n.title AS title,
+          CASE WHEN n IS NULL THEN [] ELSE labels(n) END AS labels,
+          CASE WHEN n IS NULL THEN 'Node #' + v.nodeId ELSE n.name END AS name,
+          CASE WHEN n IS NULL THEN null ELSE n.title END AS title,
+          CASE WHEN n IS NULL THEN {} ELSE properties(n) END AS properties,
           roles
       `;
     }
     
     const result = await executeQuery(cypher, params);
+    
+    // Debug info to track results
+    console.log(`API response: ${result.records.length} records found`);
     
     return NextResponse.json({ 
       success: true,
@@ -150,6 +154,8 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { operation, nodeIds, roles } = body;
     
+    console.log('Bulk operation request:', JSON.stringify(body, null, 2));
+    
     if (!operation || !Array.isArray(nodeIds) || !Array.isArray(roles)) {
       return NextResponse.json({ 
         success: false, 
@@ -164,70 +170,181 @@ export async function PUT(request: Request) {
       }, { status: 400 });
     }
     
+    // Ensure nodeIds are integers
     const nodeIdsInt = nodeIds.map(id => parseInt(id.toString()));
     
-    let result: any = null;
+    console.log(`Bulk operation: ${operation} on nodes: [`, nodeIdsInt, `] with roles:`, roles);
+    
+    // Define a type for our result to fix type errors
+    interface QueryResult {
+      records: Array<{
+        get: (key: string) => any;
+      }>;
+    }
+    
+    let result: QueryResult = { records: [{ get: () => 0 }] };
+    
     switch (operation) {
       case 'grant':
         // Grant permissions for specific roles to see specific nodes
-        result = await executeWrite(`
-          UNWIND $nodeIds AS nodeId
-          UNWIND $roles AS role
-          MERGE (p:NodePermission {nodeId: nodeId, role: role})
-          SET p.createdAt = CASE WHEN p.createdAt IS NULL THEN datetime() ELSE p.createdAt END,
-              p.updatedAt = datetime()
-          RETURN COUNT(p) as permissionsCreated
-        `, { nodeIds: nodeIdsInt, roles });
+        try {
+          const grantResult = await executeWrite<QueryResult>(`
+            UNWIND $nodeIds AS nodeId
+            UNWIND $roles AS role
+            MERGE (p:NodePermission {nodeId: nodeId, role: role})
+            SET p.createdAt = CASE WHEN p.createdAt IS NULL THEN datetime() ELSE p.createdAt END,
+                p.updatedAt = datetime()
+            RETURN COUNT(p) as permissionsCreated
+          `, { nodeIds: nodeIdsInt, roles });
+          
+          if (grantResult && grantResult.records) {
+            result = grantResult;
+          } else {
+            throw new Error('Failed to execute grant operation');
+          }
+          
+          console.log('Grant operation successful:', result);
+        } catch (error) {
+          console.error('Error in grant operation:', error);
+          throw error;
+        }
         break;
         
       case 'revoke':
         // Revoke permissions for specific roles to see specific nodes
-        result = await executeWrite(`
-          UNWIND $nodeIds AS nodeId
-          UNWIND $roles AS role
-          MATCH (p:NodePermission {nodeId: nodeId, role: role})
-          DELETE p
-          RETURN COUNT(p) as permissionsDeleted
-        `, { nodeIds: nodeIdsInt, roles });
+        console.log(`Executing revoke operation...`);
+        try {
+          // First check if permissions exist
+          const checkResult = await executeQuery(`
+            UNWIND $nodeIds AS nodeId
+            UNWIND $roles AS role
+            MATCH (p:NodePermission {nodeId: nodeId, role: role})
+            RETURN COUNT(p) as existingPermissions
+          `, { nodeIds: nodeIdsInt, roles });
+          
+          if (!checkResult || !checkResult.records || checkResult.records.length === 0) {
+            // No permissions exist or query failed
+            console.log('No permissions found or query failed');
+            break;
+          }
+          
+          const existingPermissions = checkResult.records[0].get('existingPermissions');
+          const permissionsCount = typeof existingPermissions === 'object' && existingPermissions !== null && 'low' in existingPermissions
+            ? existingPermissions.low
+            : Number(existingPermissions) || 0;
+            
+          console.log(`Found ${permissionsCount} existing permissions to revoke`);
+          
+          // Only proceed with deletion if permissions exist
+          if (permissionsCount > 0) {
+            const revokeResult = await executeWrite<QueryResult>(`
+              UNWIND $nodeIds AS nodeId
+              UNWIND $roles AS role
+              MATCH (p:NodePermission {nodeId: nodeId, role: role})
+              DELETE p
+              RETURN COUNT(p) as permissionsDeleted
+            `, { nodeIds: nodeIdsInt, roles });
+            
+            if (revokeResult && revokeResult.records) {
+              result = revokeResult;
+              console.log('revoke operation completed:', result);
+              
+              const permissionsDeleted = result.records[0].get('permissionsDeleted');
+              const deletedCount = typeof permissionsDeleted === 'object' && permissionsDeleted !== null && 'low' in permissionsDeleted
+                ? permissionsDeleted.low
+                : Number(permissionsDeleted) || 0;
+                
+              console.log(`revoke operation result count: ${deletedCount}`);
+            } else {
+              console.log('No permissions deleted or query failed');
+            }
+          } else {
+            // No permissions found to delete
+            console.log('No permissions found to revoke for the specified nodes and roles');
+          }
+        } catch (error) {
+          console.error('Error in revoke operation:', error);
+          throw error;
+        }
         break;
         
       case 'restrict':
-        // Set nodes to restricted visibility
-        result = await executeWrite(`
-          UNWIND $nodeIds AS nodeId
-          MERGE (v:NodeVisibility {nodeId: nodeId})
-          SET v.isRestricted = true,
-              v.updatedAt = datetime()
-          RETURN COUNT(v) as nodesUpdated
-        `, { nodeIds: nodeIdsInt });
+        // Make nodes restricted (visible only to specific roles)
+        try {
+          const restrictResult = await executeWrite<QueryResult>(`
+            UNWIND $nodeIds AS nodeId
+            MERGE (v:NodeVisibility {nodeId: nodeId})
+            SET v.isRestricted = true,
+                v.updatedAt = datetime()
+            RETURN COUNT(v) as nodesRestricted
+          `, { nodeIds: nodeIdsInt });
+          
+          if (restrictResult && restrictResult.records) {
+            result = restrictResult;
+          } else {
+            throw new Error('Failed to execute restrict operation');
+          }
+          
+          console.log('Restrict operation successful:', result);
+        } catch (error) {
+          console.error('Error in restrict operation:', error);
+          throw error;
+        }
         break;
         
       case 'unrestrict':
-        // Set nodes to public visibility
-        result = await executeWrite(`
-          UNWIND $nodeIds AS nodeId
-          MERGE (v:NodeVisibility {nodeId: nodeId})
-          SET v.isRestricted = false,
-              v.updatedAt = datetime()
-          RETURN COUNT(v) as nodesUpdated
-        `, { nodeIds: nodeIdsInt });
+        // Make nodes public (visible to all roles)
+        try {
+          const unrestrictResult = await executeWrite<QueryResult>(`
+            UNWIND $nodeIds AS nodeId
+            MERGE (v:NodeVisibility {nodeId: nodeId})
+            SET v.isRestricted = false,
+                v.updatedAt = datetime()
+            RETURN COUNT(v) as nodesUnrestricted
+          `, { nodeIds: nodeIdsInt });
+          
+          if (unrestrictResult && unrestrictResult.records) {
+            result = unrestrictResult;
+          } else {
+            throw new Error('Failed to execute unrestrict operation');
+          }
+          
+          console.log('Unrestrict operation successful:', result);
+        } catch (error) {
+          console.error('Error in unrestrict operation:', error);
+          throw error;
+        }
         break;
+        
+      default:
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Invalid operation' 
+        }, { status: 400 });
     }
     
-    const count = result?.records?.[0]?.get('nodesUpdated') || 
-                 result?.records?.[0]?.get('permissionsCreated') || 
-                 result?.records?.[0]?.get('permissionsDeleted') || 0;
+    // Get the appropriate property name based on operation
+    const countPropertyName = 
+      operation === 'grant' ? 'permissionsCreated' :
+      operation === 'revoke' ? 'permissionsDeleted' :
+      operation === 'restrict' ? 'nodesRestricted' : 'nodesUnrestricted';
+    
+    const affectedCount = result.records[0].get(countPropertyName);
+    
+    // Handle Neo4j integer objects and convert to regular number
+    const count = typeof affectedCount === 'object' && affectedCount !== null && 'low' in affectedCount 
+      ? affectedCount.low 
+      : Number(affectedCount) || 0;
     
     return NextResponse.json({ 
-      success: true,
-      message: `Bulk operation '${operation}' completed successfully`,
-      result: count
+      success: true, 
+      count: count
     });
   } catch (error) {
-    console.error('Error performing bulk operation on node permissions:', error);
+    console.error('Error processing bulk operation:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Failed to perform bulk operation on node permissions' 
+      error: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 });
   }
 } 

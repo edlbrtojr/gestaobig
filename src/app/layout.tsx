@@ -1,43 +1,45 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Cinzel_Decorative } from "next/font/google";
 import "./globals.css";
-import { OrgConfigProvider } from "@/components/org-config-provider";
 import { BodyContent } from "@/components/body-content";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
-import { AuthProvider } from "@/contexts/auth-context";
+import { OrgConfigProvider } from "@/contexts/org-config-provider";
+import { AuthProviders } from "@/components/auth/auth-providers";
+import { TransitionProvider } from "@/components/providers/transition-provider";
 
-const geistSans = Geist({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  variable: "--font-sans",
 });
 
-const geistMono = Geist_Mono({
+// Fonte estilo nórdico/medieval para títulos especiais
+const cinzelDecorative = Cinzel_Decorative({
+  weight: ["400", "700", "900"],
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-nordic",
 });
 
 // Metadata will be overridden by dynamic metadata in the app
 export const metadata: Metadata = {
-  title: "Frigg | Tecelã de Estratégias",
-  description:
-    "Inspirado na deusa nórdica que tece o destino, Frigg mapeia e visualiza conexões estratégicas para tomada de decisões.",
+  title: "Frigg - Tecelã de Estratégias",
+  description: "Visualize conexões estratégicas e revele padrões ocultos com o Frigg",
   authors: [{ name: "FIEAC" }],
   keywords: [
-    "Frigg",
-    "Visualização de Conexões",
-    "Análise Estratégica",
-    "Mitologia Nórdica",
-    "Tecelã de Estratégias",
     "FIEAC",
-    "Neo4j",
+    "Frigg",
+    "Estratégia",
+    "Visualização",
+    "Grafo",
+    "Redes",
+    "Conexões",
   ],
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "white" },
+    { media: "(prefers-color-scheme: dark)", color: "black" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -49,21 +51,29 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
+    <html
+      lang="pt-BR"
+      suppressHydrationWarning
+      className={`antialiased ${inter.variable} ${cinzelDecorative.variable} theme-transition`}
+    >
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen font-sans antialiased`}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <OrgConfigProvider>
-            <AuthProvider>
-              <BodyContent>
+      <body
+        className={`${inter.variable} min-h-screen font-sans antialiased`}
+      >
+        <AuthProviders>
+        <OrgConfigProvider>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <BodyContent>
+              <TransitionProvider>
                 {children}
-              </BodyContent>
-              <Toaster richColors closeButton position="top-right" />
-            </AuthProvider>
-          </OrgConfigProvider>
-        </ThemeProvider>
+              </TransitionProvider>
+            </BodyContent>
+            <Toaster richColors closeButton position="top-right" />
+          </ThemeProvider>
+        </OrgConfigProvider>
+        </AuthProviders>
       </body>
     </html>
   );

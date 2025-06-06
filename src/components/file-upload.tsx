@@ -3,7 +3,7 @@
 import React, { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Image as ImageIcon, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/utils";
 
 interface FileUploadProps {
   onFileSelected: (file: File, dataUrl: string) => void;

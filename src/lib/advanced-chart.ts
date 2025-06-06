@@ -63,7 +63,7 @@ export async function fetchAdvancedChartData(
 
   try {
     // Ensure topResults is an integer
-    const params = { topResults: Math.floor(Number(topResults)) };
+    const params = { topResults: parseInt(String(topResults), 10) || 10 };
     console.log("Query params:", params);
     
     const result = await executeQuery(query, params);
@@ -142,7 +142,7 @@ export async function fetchReverseAdvancedChartData(
 
   try {
     // Ensure topResults is an integer
-    const params = { topResults: Math.floor(Number(topResults)) };
+    const params = { topResults: parseInt(String(topResults), 10) || 10 };
     console.log("Reverse query params:", params);
     
     const result = await executeQuery(query, params);
@@ -193,7 +193,7 @@ export async function fetchSimpleAggregationData(
 
   try {
     // Ensure topResults is an integer
-    const params = { topResults: Math.floor(Number(topResults)) };
+    const params = { topResults: parseInt(String(topResults), 10) || 10 };
     console.log("Simple query params:", params);
     
     const result = await executeQuery(query, params);

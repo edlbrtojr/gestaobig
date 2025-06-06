@@ -660,7 +660,7 @@ export function WidgetEditModal({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="topResults">Limite de Resultados</Label>
+              <Label htmlFor="topResults">Resultados Principais</Label>
               <Input
                 id="topResults"
                 type="number"
@@ -669,8 +669,8 @@ export function WidgetEditModal({
                 value={editedWidget.config.topResults || 10}
                 onChange={(e) => {
                   // Parse as integer and ensure it's a positive number
-                  const value = parseInt(e.target.value);
-                  const safeValue = isNaN(value) || value < 1 ? 10 : Math.floor(value);
+                  const value = parseInt(e.target.value, 10);
+                  const safeValue = isNaN(value) || value < 1 ? 10 : value;
                   
                   setEditedWidget({
                     ...editedWidget,
@@ -680,6 +680,7 @@ export function WidgetEditModal({
                     },
                   })
                 }}
+                placeholder="Número de resultados (10 padrão)"
               />
             </div>
 

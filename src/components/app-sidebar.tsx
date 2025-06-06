@@ -1,194 +1,251 @@
 "use client";
 
 import * as React from "react";
-import { Waypoints, Home, BarChart3, FileText, Settings } from "lucide-react";
-import { usePathname } from "next/navigation";
-
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarGroupContent,
-  useSidebar,
-} from "@/components/ui/sidebar";
+import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
+import { 
+  Waypoints, 
+  Settings, 
+  LayoutDashboard, 
+  Home, 
+  LogOut, 
+  ChevronsUpDown,
+  User
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useOrganizationConfig } from "@/components/org-config-provider";
+import { Sidebar, SidebarFooter, SidebarContent, SidebarHeader, SidebarRail, SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "@/components/ui/sidebar";
+import { toast } from "sonner";
+import { siteConfig } from "@/config/site";
+import { useAuth } from "@/contexts/auth-context";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-// App navigation data
-const navItems = [
-  {
-    title: "Início",
-    url: "/",
-    icon: Home,
-  },
-  {
-    title: "O Tear",
-    url: "/graph",
-    icon: Waypoints,
-  },
-  {
-    title: "Dashboard",
-    url: "/dashboard",
-    icon: BarChart3,
-  },
-  {
-    title: "Documentação",
-    url: "/documentation",
-    icon: FileText,
-  },
-  {
-    title: "Configurações",
-    url: "/settings",
-    icon: Settings,
-  },
-];
+interface SidebarNavItemProps extends React.HTMLAttributes<HTMLAnchorElement> {
+  href: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  text: string;
+  active?: boolean;
+}
 
-export function NavItems() {
-  const { state } = useSidebar();
-  const pathname = usePathname();
+function SidebarNavItem({
+  href,
+  icon: Icon,
+  text,
+  active,
+  className,
+  ...props
+}: SidebarNavItemProps) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        className
+      )}
+      {...props}
+      data-sidebar="menu-button"
+      data-active={active}
+    >
+      {Icon && <Icon className="h-5 w-5 flex-shrink-0" />}
+      <span>{text}</span>
+    </Link>
+  );
+}
+
+function UserNav() {
+  const { user, logout, isAuthenticated } = useAuth();
+  const { isMobile } = useSidebar();
+
+  if (!isAuthenticated || !user) return null;
+
+  // Extrair as iniciais do nome para o fallback
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(part => part.charAt(0))
+      .join('')
+      .toUpperCase()
+      .substring(0, 2);
+  };
+
+  const initials = user.name ? getInitials(user.name) : 'U';
 
   return (
     <SidebarMenu>
-      {navItems.map((item) => {
-        // Check for exact match (for home) or if the current path starts with the nav item URL (for nested routes)
-        const isActive = 
-          item.url === "/" 
-            ? pathname === "/" 
-            : pathname === item.url || pathname.startsWith(`${item.url}/`);
-            
-        return (
-          <SidebarMenuItem key={item.title}>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <SidebarMenuButton
-              asChild
-              isActive={isActive}
-              tooltip={item.title}
+              size="lg"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <a
-                href={item.url}
-                className={cn(
-                  "flex items-center min-w-0",
-                  isActive
-                    ? "text-primary font-medium"
-                    : "text-muted-foreground"
-                )}
-              >
-                <div className="flex items-center gap-3 min-w-0 w-full">
-                  <div className={cn(
-                    "flex-shrink-0 w-5 h-5", 
-                    state === "collapsed" && "mx-auto"
-                  )}>
-                    <item.icon className="w-full h-full" />
-                  </div>
-                  <span className="truncate">{item.title}</span>
-                </div>
-              </a>
+              <Avatar className="h-8 w-8 rounded-lg">
+                <AvatarImage src={user.image || ""} alt={user.name || "Usuário"} />
+                <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
+              </Avatar>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">{user.name || "Usuário"}</span>
+                <span className="truncate text-xs">{user.email || ""}</span>
+              </div>
+              <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
-          </SidebarMenuItem>
-        );
-      })}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            side={isMobile ? "bottom" : "right"}
+            align="end"
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="p-0 font-normal">
+              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                <Avatar className="h-8 w-8 rounded-lg">
+                  <AvatarImage src={user.image || ""} alt={user.name || "Usuário"} />
+                  <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
+                </Avatar>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-medium">{user.name || "Usuário"}</span>
+                  <span className="truncate text-xs">{user.email || ""}</span>
+                </div>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem>
+                <User className="mr-2 h-4 w-4" />
+                Minha Conta
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="mr-2 h-4 w-4" />
+                Configurações
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => logout()}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Sair
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
     </SidebarMenu>
   );
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { config } = useOrganizationConfig();
+  const [logoError, setLogoError] = React.useState<boolean>(false);
+  const { isAuthenticated } = useAuth();
   
-  // Get the appropriate logos from organization config
-  const lightLogo = config?.theme?.lightLogo || "/images/logo-fieac-azul.png";
-  const darkLogo = config?.theme?.darkLogo || "/images/logo-fieac-branco.png";
-  const orgName = config?.shortName || "FIEAC";
-  const footerText = config?.footerText || `© ${new Date().getFullYear()} FIEAC`;
+  // Default values when no config is available
+  const currentYear = new Date().getFullYear();
+  
+  // Get the logos from organization config or use error handlers
+  const lightLogo = siteConfig.theme.lightLogo;
+  const darkLogo = siteConfig.theme.darkLogo;
+  const orgName = siteConfig.shortName || "Organization";
+  const footerText = siteConfig.footerText || `© ${currentYear}`;
+  
+  const handleLogoError = () => {
+    setLogoError(true);
+    toast.error("Failed to load organization logo");
+  };
+  
+  const pathname = usePathname();
   
   return (
-    <Sidebar
-      collapsible="icon"
-      className="border-r border-border/40 group-data-[state=collapsed]:w-16"
+    <Sidebar 
+      collapsible="icon" 
+      className="border-r"
       {...props}
     >
-      <SidebarHeader className="h-16 flex items-center px-4">
-        <div className="flex items-center w-full gap-2">
-          {/* Expanded state */}
-          <div className="hidden group-data-[state=expanded]:flex items-center w-full gap-2">
-            <div className="relative h-15 w-25">
+      <SidebarHeader className="border-b px-2 py-2">
+        <Link
+          href="/"
+          className="flex h-12 items-center justify-center gap-2 rounded-md px-2"
+          data-sidebar="logo-container"
+        >
+          {!logoError ? (
+            <div className="relative h-8 w-full max-w-[180px] min-w-[70px]">
               <Image
                 src={lightLogo}
                 alt={`${orgName} Logo`}
-                className="dark:hidden"
+                className="dark:hidden object-contain object-left"
                 fill
-                style={{ objectFit: "contain", objectPosition: "left" }}
                 priority
+                onError={handleLogoError}
               />
               <Image
                 src={darkLogo}
                 alt={`${orgName} Logo`}
-                className="hidden dark:block"
+                className="hidden dark:block object-contain object-left"
                 fill
-                style={{ objectFit: "contain", objectPosition: "left" }}
                 priority
+                onError={handleLogoError}
               />
             </div>
-            <div className="h-6 w-px bg-border" />
-            <div className="flex items-center gap-2">
-              <Waypoints className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              <span className="font-semibold text-lg">FRIGG</span>
-            </div>
-          </div>
-
-          {/* Collapsed state */}
-          <div className="flex group-data-[state=expanded]:hidden flex-col items-center justify-center w-full gap-2">
-            <div className="relative h-6 w-16">
-              <Image
-                src={lightLogo}
-                alt={`${orgName} Logo`}
-                className="dark:hidden"
-                fill
-                style={{ objectFit: "contain", objectPosition: "center" }}
-                priority
-              />
-              <Image
-                src={darkLogo}
-                alt={`${orgName} Logo`}
-                className="hidden dark:block"
-                fill
-                style={{ objectFit: "contain", objectPosition: "center" }}
-                priority
-              />
-            </div>
-            <div className="w-full h-px bg-border" />
-            <div className="flex items-center gap-2 size-5">
-              <Waypoints className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            </div>
-          </div>
-        </div>
+          ) : (
+            <span className="font-semibold text-xl truncate">{orgName}</span>
+          )}
+        </Link>
       </SidebarHeader>
-
-      <SidebarContent className="px-2 py-2">
-        <SidebarGroup>
-          <SidebarGroupLabel className="px-2 text-xs uppercase tracking-wider text-muted-foreground hidden group-data-[state=expanded]:block">
-            Navegação
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <NavItems />
-          </SidebarGroupContent>
-        </SidebarGroup>
+      <SidebarContent className="p-2">
+        <nav className="grid gap-1">
+          <SidebarNavItem
+            href="/"
+            icon={Home}
+            text="Home"
+            active={pathname === "/"}
+          />
+          <SidebarNavItem
+            href="/graph"
+            icon={Waypoints}
+            text="O Tear"
+            active={pathname === "/graph"}
+          />
+          {isAuthenticated && (
+            <>
+              <SidebarNavItem
+                href="/dashboard"
+                icon={LayoutDashboard}
+                text="Dashboard"
+                active={pathname === "/dashboard"}
+              />
+              <SidebarNavItem
+                href="/settings"
+                icon={Settings}
+                text="Configurações"
+                active={pathname.startsWith("/settings")}
+              />
+            </>
+          )}
+        </nav>
       </SidebarContent>
-
-      <SidebarFooter className="mt-auto p-2 border-t border-sidebar-border">
-        <div className="hidden group-data-[state=expanded]:block text-center">
-          <p className="text-xs text-muted-foreground/70">
-            {footerText}
-          </p>
-        </div>
+      <SidebarFooter className="border-t p-2">
+        {isAuthenticated ? (
+          <UserNav />
+        ) : (
+          <div className="flex flex-col gap-1">
+            <div className="text-xs text-muted-foreground">
+              {footerText}
+            </div>
+          </div>
+        )}
       </SidebarFooter>
-
       <SidebarRail />
     </Sidebar>
   );

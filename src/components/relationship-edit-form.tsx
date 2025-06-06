@@ -285,7 +285,7 @@ export default function RelationshipEditForm({
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to update relationship");
+        throw new Error(errorData.error || "Falha ao atualizar relacionamento");
       }
 
       const updatedRelationship = await response.json();
@@ -293,7 +293,7 @@ export default function RelationshipEditForm({
     } catch (error) {
       console.error("Error updating relationship:", error);
       setError(
-        error instanceof Error ? error.message : "Failed to update relationship"
+        error instanceof Error ? error.message : "Falha ao atualizar relacionamento"
       );
       setIsSubmitting(false);
     }
@@ -310,7 +310,7 @@ export default function RelationshipEditForm({
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to delete relationship");
+        throw new Error(errorData.error || "Falha ao excluir relacionamento");
       }
 
       if (onDelete) {
@@ -320,7 +320,7 @@ export default function RelationshipEditForm({
     } catch (error) {
       console.error("Error deleting relationship:", error);
       setError(
-        error instanceof Error ? error.message : "Failed to delete relationship"
+        error instanceof Error ? error.message : "Falha ao excluir relacionamento"
       );
       setIsDeleting(false);
     }
@@ -369,7 +369,7 @@ export default function RelationshipEditForm({
       if (propDef.type === 'date') return 'date';
       if (propDef.type === 'enum') return 'select';
       if (propDef.type === 'boolean') return 'checkbox';
-      if (propDef.type === 'string' && (propertyName === 'description' || formatValueForEditing(value).length > 50)) {
+      if (propDef.type === 'string' && (propertyName === 'descricao' || formatValueForEditing(value).length > 50)) {
         return 'textarea';
       }
       return 'text';
@@ -388,6 +388,32 @@ export default function RelationshipEditForm({
     return propDef?.options || [];
   };
 
+  // Map relationship types to human-readable labels
+  const getRelationshipTypeLabel = (type: string) => {
+    const labelMap: Record<string, string> = {
+      'POSSUI': 'Possui',
+      'TEM_PROPOSITO': 'Tem propósito',
+      'TEM_MISSAO': 'Tem missão',
+      'TEM_VISAO': 'Tem visão',
+      'INCLUI': 'Inclui',
+      'PRESTA_SERVICO_PARA': 'Presta serviço para',
+      'ATUA_EM': 'Atua em'
+    };
+    
+    return labelMap[type] || type;
+  };
+
+  // Get source and target node names
+  const getNodeName = (node: any) => {
+    if (typeof node === "object") {
+      // Try to find the name in known property keys
+      return node.properties?.nome || 
+             node.properties?.name ||
+             `Nó ID: ${node.id}`;
+    }
+    return `Nó ID: ${node}`;
+  };
+
   return (
     <>
       <form
@@ -399,17 +425,13 @@ export default function RelationshipEditForm({
           <div className="p-3 bg-muted rounded-md">
             <div className="text-xs uppercase text-muted-foreground mb-1">De</div>
             <div className="font-medium truncate">
-              {typeof relationship.source === "object" 
-                ? relationship.source.properties?.name || `Node ID: ${relationship.source.id}` 
-                : `Node ID: ${relationship.source}`}
+              {getNodeName(relationship.source)}
             </div>
           </div>
           <div className="p-3 bg-muted rounded-md">
             <div className="text-xs uppercase text-muted-foreground mb-1">Para</div>
             <div className="font-medium truncate">
-              {typeof relationship.target === "object" 
-                ? relationship.target.properties?.name || `Node ID: ${relationship.target.id}` 
-                : `Node ID: ${relationship.target}`}
+              {getNodeName(relationship.target)}
             </div>
           </div>
         </div>
@@ -509,7 +531,7 @@ export default function RelationshipEditForm({
                           required={prop.required}
                         />
                         <label htmlFor={prop.name} className="text-sm text-gray-700 dark:text-gray-300">
-                          {value === true || value === 'true' ? 'Yes' : 'No'}
+                          {value === true || value === 'true' ? 'Sim' : 'Não'}
                         </label>
                       </div>
                     ) : (

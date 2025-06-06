@@ -2,58 +2,84 @@ import neo4j, { Driver, Session, Transaction } from "neo4j-driver";
 
 let driver: Driver | null = null;
 let connectionStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
-let lastPasswordAttempt: string | null = null;
+let connectionAttempts = 0;
+const MAX_CONNECTION_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 5000; // 5 segundos de espera entre tentativas
 
 // Create a singleton Neo4j driver instance that can be reused
 export async function getDriver(): Promise<Driver | null> {
   // Get connection data from environment variables
   const uri = process.env.NEO4J_URI || "bolt://localhost:7687";
-  const user = process.env.NEO4J_USERNAME || "neo4j";
-  const password = process.env.NEO4J_PASSWORD || "3d1Jun1or";
+  const user = process.env.NEO4J_USER || "neo4j";
+  const password = process.env.NEO4J_PASSWORD || "";
   
-  // Se temos um driver e a senha não mudou, retornamos
-  if (driver && lastPasswordAttempt === password) {
+  // Logs de depuração simplificados
+  console.log(`Conectando ao Neo4j com: ${uri}, usuário: ${user}, autenticação: ${password ? "com senha" : "sem senha"}`);
+  
+  // Se já temos um driver conectado, retornamos
+  if (driver && connectionStatus === 'connected') {
     return driver;
   }
 
-  // If we already tried and got an error, don't retry immediately with the same password
-  if (connectionStatus === 'disconnected' && lastPasswordAttempt === password) {
-    console.warn("Neo4j connection previously failed");
+  // Se já tentamos muitas vezes, aguardar antes de tentar novamente
+  if (connectionStatus === 'disconnected' && connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
+    console.warn(`Neo4j connection failed after ${MAX_CONNECTION_ATTEMPTS} attempts. Waiting before retrying.`);
+    // Reset connection attempts after some time
+    setTimeout(() => {
+      connectionAttempts = 0;
+    }, RETRY_DELAY_MS);
     return null;
   }
 
   // Make sure we only instantiate the driver once
   try {
     connectionStatus = 'connecting';
+    connectionAttempts++;
+    
     // Fechar driver anterior se existir
     if (driver) {
       await driver.close();
       driver = null;
     }
 
-    console.log("Conectando ao Neo4j com:", { uri, user });
+    console.log(`Tentativa de conexão ${connectionAttempts}/${MAX_CONNECTION_ATTEMPTS}`);
 
-    const connectionTimeout = parseInt(process.env.NEXT_PUBLIC_CONNECTION_TIMEOUT || '5000', 10);
+    const connectionTimeout = parseInt(process.env.NEXT_PUBLIC_CONNECTION_TIMEOUT || '15000', 10);
     
-    // Instantiate the driver
-    driver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
+    // Configurações comuns do driver
+    const driverConfig = {
       maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
       maxConnectionPoolSize: 50,
-      connectionAcquisitionTimeout: Math.max(connectionTimeout * 2, 10000), // pelo menos o dobro do connectionTimeout
-      disableLosslessIntegers: true, // converts Int to JS Number
-      connectionTimeout: connectionTimeout
-    });
+      connectionAcquisitionTimeout: Math.max(connectionTimeout * 2, 30000),
+      disableLosslessIntegers: true,
+      connectionTimeout: connectionTimeout,
+      maxTransactionRetryTime: 30000
+    };
+    
+    // Instantiate the driver with or without authentication based on password
+    if (password) {
+      driver = neo4j.driver(uri, neo4j.auth.basic(user, password), driverConfig);
+    } else {
+      // Sem autenticação - usando credenciais vazias
+      driver = neo4j.driver(uri, neo4j.auth.basic("neo4j", ""), driverConfig);
+    }
 
     // Verifica se a conexão está funcionando
     await driver.verifyConnectivity();
     connectionStatus = 'connected';
-    lastPasswordAttempt = password;
+    connectionAttempts = 0; // Reset connection attempts on success
     console.log('Neo4j connection established successfully');
     return driver;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Falha ao criar driver Neo4j:", error);
+    
+    // Tratamento específico para erro de autenticação
+    if (error.code === 'Neo.ClientError.Security.AuthenticationRateLimit') {
+      console.warn("Limite de tentativas de autenticação excedido. Aguarde alguns minutos antes de tentar novamente.");
+      connectionAttempts = MAX_CONNECTION_ATTEMPTS; // Force waiting
+    }
+    
     connectionStatus = 'disconnected';
-    lastPasswordAttempt = password;
     driver = null;
     return null;
   }
@@ -81,7 +107,7 @@ export async function isDatabaseAvailable(): Promise<boolean> {
 // Reset connection error and retry
 export function resetConnectionError() {
   connectionStatus = 'disconnected';
-  lastPasswordAttempt = null;
+  connectionAttempts = 0;
   if (driver) {
     driver.close().catch(e => console.error("Erro ao fechar conexão Neo4j:", e));
     driver = null;
@@ -155,6 +181,7 @@ export async function executeQuery(cypher: string, params: Record<string, any> =
     return await session.run(cypher, params);
   } catch (error) {
     console.error("Erro ao executar consulta:", error);
+    // Propaga o erro para melhor diagnóstico
     throw error;
   } finally {
     await session.close();
@@ -175,4 +202,9 @@ export async function closeDriver(): Promise<void> {
 // Retorna o status atual da conexão
 export function getConnectionStatus() {
   return connectionStatus;
+}
+
+// Retorna o número de tentativas de conexão
+export function getConnectionAttempts() {
+  return connectionAttempts;
 }

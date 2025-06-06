@@ -25,57 +25,45 @@ export interface OrganizationConfig {
   theme: OrganizationTheme;
 }
 
-// Default config as fallback
-const DEFAULT_ORG_CONFIG: OrganizationConfig = {
-  name: "Federação das Indústrias do Estado do Acre",
-  shortName: "FIEAC",
-  logoUrl: "/uploads/4072219a-04e7-4c79-9428-dc6e5169f574.png",
-  logoSmallUrl: "/uploads/8af51858-0543-424d-8d59-ba57c1ede5a1.png",
-  faviconUrl: "/favicon.ico",
-  primaryColor: "#004a93",
-  secondaryColor: "#f4791f",
-  tertiaryColor: "#e5e5e5",
-  footerText: "© 2025 FIEAC - Todos os direitos reservados",
-  contactEmail: "fieac@fieac.org.br",
-  contactPhone: "(68) 3212-4200",
-  address: "Rua Rui Barbosa, 735 - Centro, Rio Branco - AC, 69900-084",
-  theme: {
-    defaultMode: "light",
-    enableSystem: true,
-    lightLogo: "/uploads/4072219a-04e7-4c79-9428-dc6e5169f574.png",
-    darkLogo: "/uploads/8af51858-0543-424d-8d59-ba57c1ede5a1.png",
-  }
-};
-
 /**
  * GET handler for /api/config endpoint
  * Retrieves organization configuration from the database
  */
 export async function GET() {
   try {
-    const result = await db.run(`
-      MATCH (org:Organization)
+    // First, try to find the new node type
+    let result = await db.run(`
+      MATCH (org:_inAppOrgConfig)
       RETURN org
       LIMIT 1
     `);
-
-    // Se não houver registros, provavelmente está trabalhando offline
+    
+    // If no records found with new label, try the old Organization label
     if (!result.records || result.records.length === 0) {
-      console.log("Sem registros de organização, usando configuração padrão");
-      return NextResponse.json({
-        ...DEFAULT_ORG_CONFIG,
-        _source: "default"
-      });
+      result = await db.run(`
+        MATCH (org:Organization)
+        RETURN org
+        LIMIT 1
+      `);
+    }
+
+    // If still no records, return a proper error
+    if (!result.records || result.records.length === 0) {
+      console.log("No organization records found");
+      return NextResponse.json(
+        { error: "Organization configuration not found" },
+        { status: 404 }
+      );
     }
 
     const orgNode = result.records[0]?.get('org');
     
     if (!orgNode) {
-      // Return default config if none exists
-      return NextResponse.json({
-        ...DEFAULT_ORG_CONFIG,
-        _source: "default"
-      });
+      // Return error if node doesn't exist
+      return NextResponse.json(
+        { error: "Organization configuration not found" },
+        { status: 404 }
+      );
     }
 
     // Extract properties from the Neo4j node
@@ -84,26 +72,52 @@ export async function GET() {
     // Parse theme JSON string to object if it exists
     let theme;
     try {
-      theme = orgProps.theme ? JSON.parse(orgProps.theme) : DEFAULT_ORG_CONFIG.theme;
+      if (!orgProps.theme) {
+        throw new Error("Theme configuration missing");
+      }
+      theme = JSON.parse(orgProps.theme);
     } catch (e) {
       console.error("Error parsing theme JSON:", e);
-      theme = DEFAULT_ORG_CONFIG.theme;
+      return NextResponse.json(
+        { error: "Invalid theme configuration" },
+        { status: 400 }
+      );
+    }
+    
+    // Validate required properties - making this optional now
+    const requiredProps = [
+      'name', 'shortName', 'logoUrl', 'primaryColor', 'secondaryColor'
+    ];
+    
+    const missingProps = requiredProps.filter(prop => !orgProps[prop]);
+    if (missingProps.length > 0) {
+      console.warn(`Missing some properties: ${missingProps.join(', ')}`);
+    }
+    
+    // Make theme logos optional
+    if (!theme.lightLogo || !theme.darkLogo) {
+      console.warn("Missing theme logos");
     }
     
     const config: OrganizationConfig = {
-      name: orgProps.name || DEFAULT_ORG_CONFIG.name,
-      shortName: orgProps.shortName || DEFAULT_ORG_CONFIG.shortName,
-      logoUrl: orgProps.logoUrl || DEFAULT_ORG_CONFIG.logoUrl,
-      logoSmallUrl: orgProps.logoSmallUrl || DEFAULT_ORG_CONFIG.logoSmallUrl,
-      faviconUrl: orgProps.faviconUrl || DEFAULT_ORG_CONFIG.faviconUrl,
-      primaryColor: orgProps.primaryColor || DEFAULT_ORG_CONFIG.primaryColor,
-      secondaryColor: orgProps.secondaryColor || DEFAULT_ORG_CONFIG.secondaryColor,
-      tertiaryColor: orgProps.tertiaryColor || DEFAULT_ORG_CONFIG.tertiaryColor,
-      footerText: orgProps.footerText || DEFAULT_ORG_CONFIG.footerText,
-      contactEmail: orgProps.contactEmail || DEFAULT_ORG_CONFIG.contactEmail,
-      contactPhone: orgProps.contactPhone || DEFAULT_ORG_CONFIG.contactPhone,
-      address: orgProps.address || DEFAULT_ORG_CONFIG.address,
-      theme
+      name: orgProps.name || "",
+      shortName: orgProps.shortName || "",
+      logoUrl: orgProps.logoUrl || "",
+      logoSmallUrl: orgProps.logoSmallUrl || "",
+      faviconUrl: orgProps.faviconUrl || "",
+      primaryColor: orgProps.primaryColor || "#004a93",
+      secondaryColor: orgProps.secondaryColor || "#f4791f",
+      tertiaryColor: orgProps.tertiaryColor || "#e5e5e5",
+      footerText: orgProps.footerText || "",
+      contactEmail: orgProps.contactEmail || "",
+      contactPhone: orgProps.contactPhone || "",
+      address: orgProps.address || "",
+      theme: {
+        defaultMode: theme.defaultMode || "light",
+        enableSystem: theme.enableSystem ?? true,
+        lightLogo: theme.lightLogo || "",
+        darkLogo: theme.darkLogo || ""
+      }
     };
 
     return NextResponse.json({
@@ -112,12 +126,10 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Error fetching organization config:", error);
-    // Em caso de erro, retornar a configuração padrão em vez de falhar com 500
-    return NextResponse.json({
-      ...DEFAULT_ORG_CONFIG,
-      _source: "default",
-      _error: "Falha ao buscar configuração"
-    }, { status: 200 }); // Sempre retorna 200 para não quebrar a UI
+    return NextResponse.json(
+      { error: "Failed to fetch organization configuration" },
+      { status: 500 }
+    );
   }
 }
 
@@ -129,20 +141,33 @@ export async function POST(request: NextRequest) {
   try {
     const body: OrganizationConfig = await request.json();
     
-    // Validate required fields
-    const requiredFields = ['name', 'shortName', 'primaryColor'];
-    for (const field of requiredFields) {
-      if (!body[field as keyof OrganizationConfig]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        );
-      }
+    // Validation is now optional
+    const requiredFields = [
+      'name', 'shortName', 'primaryColor', 'secondaryColor', 
+      'logoUrl', 'faviconUrl'
+    ];
+    
+    const missingFields = requiredFields.filter(
+      field => !body[field as keyof OrganizationConfig]
+    );
+    
+    if (missingFields.length > 0) {
+      console.warn(`Missing some fields: ${missingFields.join(', ')}`);
+    }
+    
+    // Theme validation is now optional
+    if (!body.theme) {
+      body.theme = {
+        defaultMode: "light",
+        enableSystem: true,
+        lightLogo: "",
+        darkLogo: ""
+      };
     }
 
-    // Create Cypher query to update or create the organization
+    // Create Cypher query to update or create the config node with new label
     const result = await db.run(`
-      MERGE (org:Organization)
+      MERGE (org:_inAppOrgConfig)
       SET org.name = $name,
           org.shortName = $shortName,
           org.logoUrl = $logoUrl,
@@ -159,30 +184,32 @@ export async function POST(request: NextRequest) {
           org.updatedAt = datetime()
       RETURN org
     `, {
-      name: body.name,
-      shortName: body.shortName,
-      logoUrl: body.logoUrl,
-      logoSmallUrl: body.logoSmallUrl,
-      faviconUrl: body.faviconUrl,
-      primaryColor: body.primaryColor,
-      secondaryColor: body.secondaryColor,
-      tertiaryColor: body.tertiaryColor,
-      footerText: body.footerText,
-      contactEmail: body.contactEmail,
-      contactPhone: body.contactPhone,
-      address: body.address,
-      theme: JSON.stringify(body.theme)
+      name: body.name || "",
+      shortName: body.shortName || "",
+      logoUrl: body.logoUrl || "",
+      logoSmallUrl: body.logoSmallUrl || "",
+      faviconUrl: body.faviconUrl || "",
+      primaryColor: body.primaryColor || "#004a93",
+      secondaryColor: body.secondaryColor || "#f4791f",
+      tertiaryColor: body.tertiaryColor || "#e5e5e5",
+      footerText: body.footerText || "",
+      contactEmail: body.contactEmail || "",
+      contactPhone: body.contactPhone || "",
+      address: body.address || "",
+      theme: JSON.stringify(body.theme || {
+        defaultMode: "light",
+        enableSystem: true,
+        lightLogo: "",
+        darkLogo: ""
+      })
     });
 
-    // Verificar se a operação foi bem-sucedida
+    // Check if the operation was successful
     if (!result.records || result.records.length === 0) {
-      console.warn("Configuração não salva no banco de dados, modo offline");
-      return NextResponse.json({ 
-        success: true, 
-        config: body,
-        _source: "memory",
-        _warning: "Configuração armazenada apenas em memória (modo offline)"
-      });
+      return NextResponse.json(
+        { error: "Failed to save configuration, database may be offline" },
+        { status: 503 }
+      );
     }
 
     return NextResponse.json({ 
@@ -195,10 +222,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false,
-        error: "Failed to update organization configuration",
-        _source: "error"
+        error: "Failed to update organization configuration"
       },
-      { status: 200 } // Retornar 200 para não quebrar a UI
+      { status: 500 }
     );
   }
 } 

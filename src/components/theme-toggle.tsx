@@ -5,12 +5,23 @@ import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
-import { useOrganizationConfig } from "@/components/org-config-provider";
+import { useOrganizationConfig } from "@/contexts/org-config-provider";
+import { siteConfig } from "@/config/site";
 
 export default function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { config } = useOrganizationConfig();
   const [mounted, setMounted] = React.useState(false);
+  
+  // Tenta usar o contexto de configuração, mas não falha se não estiver disponível
+  let orgConfig;
+  try {
+    const { config } = useOrganizationConfig();
+    orgConfig = config;
+  } catch (error) {
+    // Se o contexto não estiver disponível, usa a configuração padrão
+    console.warn("OrgConfigProvider não encontrado, usando configuração padrão");
+    orgConfig = siteConfig;
+  }
 
   // Avoid hydration mismatch
   React.useEffect(() => {
@@ -37,8 +48,8 @@ export default function ThemeToggle() {
     return theme === "dark" ? "dark-icon" : "light-icon";
   }, [theme]);
 
-  // Don't show toggle if system preference is not enabled
-  if (!mounted || (config && !config.theme.enableSystem)) {
+  // Don't show toggle if system preference is not enabled or if not mounted yet
+  if (!mounted || (orgConfig && !orgConfig.theme.enableSystem)) {
     return null;
   }
 

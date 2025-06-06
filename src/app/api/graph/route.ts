@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { executeRead } from "@/lib/neo4j";
-import { QueryResult } from "neo4j-driver";
+import neo4j from "neo4j-driver";
+
+// Configuração do driver Neo4j
+const uri = process.env.NEO4J_URI || "bolt://localhost:7687";
+const user = process.env.NEO4J_USER || "neo4j";
+const password = process.env.NEO4J_PASSWORD || "";
+const driver = neo4j.driver(uri, neo4j.auth.basic(user, password));
 
 /**
  * GET handler for /api/graph endpoint
@@ -10,13 +15,43 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     
-    // Parse filter parameters
-    const nodeLabels = searchParams.get('nodeLabels')?.split(',').filter(Boolean) || [];
-    const relationshipTypes = searchParams.get('relationshipTypes')?.split(',').filter(Boolean) || [];
-    const propertyFilters = searchParams.get('propertyFilters') ? 
-      JSON.parse(searchParams.get('propertyFilters') || '[]') : 
-      [];
-
+    // Extract search parameters
+    const search = searchParams.get('search') || '';
+    const company = searchParams.get('company') || '';
+    const unit = searchParams.get('unit') || '';
+    
+    // Get all node labels and relationship types
+    const nodeLabels = await getNodeLabels();
+    const relationshipTypes = await getRelationshipTypes();
+    
+    // Build property filters based on search parameters
+    const propertyFilters: Array<{property: string, value: any, operator: string}> = [];
+    
+    if (search) {
+      propertyFilters.push({
+        property: 'name',
+        value: `(?i).*${search}.*`,
+        operator: '=~'
+      });
+    }
+    
+    if (company && company !== 'SISTEMA FIEAC') {
+      propertyFilters.push({
+        property: 'company',
+        value: company,
+        operator: '='
+      });
+    }
+    
+    if (unit && unit !== 'Todas') {
+      propertyFilters.push({
+        property: 'unit',
+        value: unit,
+        operator: '='
+      });
+    }
+    
+    // Get filtered graph data
     return await getFilteredGraphData(nodeLabels, relationshipTypes, propertyFilters);
   } catch (error) {
     console.error("Error fetching graph data:", error);
@@ -27,110 +62,111 @@ export async function GET(request: Request) {
   }
 }
 
-/**
- * Get filtered nodes and relationships based on criteria
- */
+// Helper function to get all node labels
+async function getNodeLabels(): Promise<string[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(`
+      CALL db.labels() YIELD label
+      RETURN collect(label) AS labels
+    `);
+    return result.records[0].get('labels');
+  } finally {
+    await session.close();
+  }
+}
+
+// Helper function to get all relationship types
+async function getRelationshipTypes(): Promise<string[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(`
+      CALL db.relationshipTypes() YIELD relationshipType
+      RETURN collect(relationshipType) AS types
+    `);
+    return result.records[0].get('types');
+  } finally {
+    await session.close();
+  }
+}
+
+// Function to get filtered graph data
 async function getFilteredGraphData(
   nodeLabels: string[],
   relationshipTypes: string[],
   propertyFilters: Array<{property: string, value: any, operator: string}>
 ) {
-  // Build node label filter condition
-  let nodeLabelFilter = '';
-  let nodeFilterParams: Record<string, any> = {};
+  const session = driver.session();
   
-  if (nodeLabels.length > 0) {
-    nodeLabelFilter = 'WHERE ' + nodeLabels.map((label, i) => `ANY(l IN labels(n) WHERE l = $label${i})`).join(' OR ');
-    nodeLabels.forEach((label, i) => {
-      nodeFilterParams[`label${i}`] = label;
-    });
-  }
-
-  // Build property filter conditions
-  if (propertyFilters.length > 0) {
-    const propConditions = propertyFilters.map((filter, i) => {
-      const { property, operator, value } = filter;
-      nodeFilterParams[`propVal${i}`] = value;
+  try {
+    // Build the Cypher query
+    let cypher = `
+      MATCH (n)
+      WHERE true
+    `;
+    
+    // Add property filters
+    if (propertyFilters.length > 0) {
+      const filters = propertyFilters.map((filter, index) => {
+        return `n.${filter.property} ${filter.operator} $filterValue${index}`;
+      }).join(" OR ");
       
-      switch (operator) {
-        case 'CONTAINS': return `n.${property} CONTAINS $propVal${i}`;
-        case 'STARTS WITH': return `n.${property} STARTS WITH $propVal${i}`;
-        case 'ENDS WITH': return `n.${property} ENDS WITH $propVal${i}`;
-        default: return `n.${property} ${operator} $propVal${i}`;
-      }
+      cypher += ` AND (${filters})`;
+    }
+    
+    // Complete the query to fetch nodes and relationships
+    cypher += `
+      WITH collect(n) AS nodes
+      UNWIND nodes AS n
+      MATCH (n)-[r]-(m)
+      WHERE m IN nodes
+      RETURN nodes, collect(r) AS relationships
+    `;
+    
+    // Create parameters for the query
+    const params: Record<string, any> = {};
+    propertyFilters.forEach((filter, index) => {
+      params[`filterValue${index}`] = filter.value;
     });
     
-    nodeLabelFilter = nodeLabelFilter 
-      ? `${nodeLabelFilter} AND ${propConditions.join(' AND ')}`
-      : `WHERE ${propConditions.join(' AND ')}`;
-  }
-  
-  // Query to get filtered nodes
-  const nodesQuery = `
-    MATCH (n)
-    ${nodeLabelFilter}
-    RETURN collect({
-      id: toString(id(n)),
-      label: labels(n)[0],
-      properties: properties(n)
-    }) as nodes
-  `;
-
-  // Build relationship type filter condition
-  let relTypeFilter = '';
-  let relFilterParams: Record<string, any> = {};
-  
-  if (relationshipTypes.length > 0) {
-    relTypeFilter = 'WHERE ' + relationshipTypes.map((type, i) => `type(r) = $relType${i}`).join(' OR ');
-    relationshipTypes.forEach((type, i) => {
-      relFilterParams[`relType${i}`] = type;
-    });
-  }
-
-  // Query to get filtered relationships
-  const relationshipsQuery = `
-    MATCH (source)-[r]->(target)
-    ${relTypeFilter}
-    RETURN collect({
-      id: toString(id(r)),
-      source: toString(id(source)),
-      target: toString(id(target)),
-      type: type(r),
-      properties: properties(r)
-    }) as relationships
-  `;
-
-  try {
-    // Run both queries in parallel for efficiency
-    const [nodesResult, relationshipsResult] = await Promise.all([
-      executeRead<QueryResult>(nodesQuery, nodeFilterParams),
-      executeRead<QueryResult>(relationshipsQuery, relFilterParams),
-    ]);
-
-    // Se alguma das consultas falhou, retorne um conjunto vazio de dados
-    if (!nodesResult || !relationshipsResult) {
-      console.warn("Algumas consultas ao banco de dados falharam, retornando dados vazios");
-      return NextResponse.json({ 
-        nodes: [], 
-        relationships: [],
-        status: "partial_error"
-      });
+    // Execute the query
+    const result = await session.run(cypher, params);
+    
+    if (result.records.length === 0) {
+      return NextResponse.json({ nodes: [], relationships: [] });
     }
-
-    // Extract the data from the results
-    const nodes = nodesResult.records[0]?.get("nodes") || [];
-    const relationships = relationshipsResult.records[0]?.get("relationships") || [];
-
-    // Return the filtered graph data as JSON
+    
+    // Process the results
+    const record = result.records[0];
+    const nodes = record.get('nodes').map((node: any) => {
+      return {
+        id: node.identity,
+        label: node.labels[0],
+        properties: node.properties
+      };
+    });
+    
+    const relationships = record.get('relationships').map((rel: any) => {
+      return {
+        id: rel.identity,
+        source: rel.start,
+        target: rel.end,
+        type: rel.type,
+        properties: rel.properties
+      };
+    });
+    
+    // Return the graph data
     return NextResponse.json({ nodes, relationships });
   } catch (error) {
-    console.error("Erro ao executar consultas do grafo:", error);
-    // Retornar dados vazios em caso de erro
+    console.error("Error fetching filtered graph data:", error);
     return NextResponse.json({ 
       nodes: [], 
       relationships: [],
       status: "error",
-      message: "Falha ao recuperar dados do grafo"
-    }, { status: 200 }); // Retornar 200 para não quebrar a interface
+      message: "Failed to retrieve graph data"
+    }, { status: 200 }); // Return 200 to not break the UI
+  } finally {
+    await session.close();
   }
 }

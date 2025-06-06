@@ -2,6 +2,29 @@
 
 Um aplicativo web interativo para visualização de grafos de relacionamentos entre riscos, oportunidades, planos de ação e estratégias organizacionais usando Neo4j e Next.js.
 
+## Configuração Inicial da Organização
+
+Após a remoção dos dados padrão codificados, é necessário inicializar a configuração da organização antes de usar o aplicativo. Siga estes passos:
+
+1. Inicie o servidor de desenvolvimento:
+   ```bash
+   npm run dev
+   ```
+
+2. Em um terminal separado, execute o script de inicialização:
+   ```bash
+   npm run init-config
+   ```
+
+Este script irá:
+- Procurar por imagens de logo no diretório `/public/images`
+- Criar uma configuração inicial da organização
+- Armazenar no banco de dados Neo4j
+
+Se você não executar esta etapa de inicialização, verá mensagens de erro sobre configuração ausente ao tentar acessar o aplicativo.
+
+Você pode personalizar as configurações da organização posteriormente através da interface de administração em `/settings/organization`.
+
 ## Características
 
 - Visualização interativa de grafos usando D3.js
@@ -46,7 +69,7 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
 3. Inicie o Neo4j usando Docker
 
    ```bash
-   docker run -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/3d1Jun1or neo4j:latest
+   docker run -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/SuaSenhaAqui neo4j:latest
    ```
 
 4. Configure as variáveis de ambiente
@@ -54,7 +77,7 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
    ```
    NEO4J_URI=bolt://localhost:7687
    NEO4J_USER=neo4j
-   NEO4J_PASSWORD=3d1Jun1or
+   NEO4J_PASSWORD=SuaSenhaAqui
    ```
 
 5. Inicie o servidor de desenvolvimento
@@ -63,7 +86,13 @@ Um aplicativo web interativo para visualização de grafos de relacionamentos en
    npm run dev
    ```
 
-6. Acesse `http://localhost:3000` e clique em "Gerar Dados de Exemplo" para popular o banco com dados de demonstração
+6. Inicialize a configuração da organização
+
+   ```bash
+   npm run init-config
+   ```
+
+7. Acesse `http://localhost:3000` e clique em "Gerar Dados de Exemplo" para popular o banco com dados de demonstração
 
 ### Configuração de Usuários de Teste (Opcional)
 
@@ -175,3 +204,139 @@ MIT
 ---
 
 Desenvolvido por Edilberto Junior
+
+## Estrutura do Banco de Dados
+
+O banco de dados é estruturado com os seguintes tipos de nós:
+
+- **Empresa**: Representa as empresas do sistema (FIEAC, SESI, SENAI, IEL)
+- **Unidade**: Representa unidades organizacionais (categorizadas como MEIO ou FIM)
+- **Missao**: Define a missão de uma empresa
+- **Visao**: Define a visão de uma empresa
+- **Proposito**: Define o propósito de uma empresa
+- **Negocio**: Define um tipo de negócio
+- **SistemaApoio**: Representa o sistema de áreas compartilhadas
+
+Estes nós se relacionam através das seguintes relações:
+
+- **POSSUI**: Conecta uma Empresa a suas Unidades
+- **TEM_PROPOSITO**: Conecta uma Empresa ao seu Propósito
+- **TEM_MISSAO**: Conecta uma Empresa à sua Missão
+- **TEM_VISAO**: Conecta uma Empresa à sua Visão
+- **INCLUI**: Relaciona o SistemaApoio às Unidades de apoio
+- **PRESTA_SERVICO_PARA**: Relaciona o SistemaApoio às Empresas
+- **ATUA_EM**: Conecta uma Unidade ao seu tipo de Negócio
+
+## Inicialização do Banco de Dados
+
+Para inicializar o banco de dados com a estrutura organizacional definida:
+
+```bash
+node scripts/clear-db.js --init
+```
+
+Este comando irá:
+1. Limpar o banco de dados atual (preservando configurações de schema)
+2. Executar o script `create_database.cypher` para criar a estrutura organizacional
+
+Para apenas limpar o banco sem inicializar:
+
+```bash
+node scripts/clear-db.js
+```
+
+## Desenvolvimento
+
+```bash
+npm run dev
+```
+
+## Testes
+
+```bash
+npm test
+```
+
+## Build
+
+```bash
+npm run build
+```
+
+## Visualização no Neo4j Browser
+
+Para uma melhor visualização no Neo4j Browser, experimente estas queries:
+
+```cypher
+// Visualizar empresas e suas unidades fim
+MATCH (e:Empresa)-[:POSSUI]->(u:Unidade {categoria: "FIM"})
+RETURN e, u
+
+// Visualizar missão, visão e propósito de todas as empresas
+MATCH (e:Empresa)
+OPTIONAL MATCH (e)-[:TEM_MISSAO]->(m:Missao)
+OPTIONAL MATCH (e)-[:TEM_VISAO]->(v:Visao)
+OPTIONAL MATCH (e)-[:TEM_PROPOSITO]->(p:Proposito)
+RETURN e, m, v, p
+
+// Visualizar sistema de apoio compartilhado
+MATCH (s:SistemaApoio)-[:PRESTA_SERVICO_PARA]->(e:Empresa)
+RETURN s, e
+
+// Visualizar unidades fim e seus tipos de negócio
+MATCH (u:Unidade {categoria: "FIM"})-[:ATUA_EM]->(n:Negocio)
+RETURN u, n
+```
+
+## Estilo de Visualização
+
+Para melhorar a visualização no Neo4j Browser, aplique este estilo:
+
+```
+:style {
+  "node": {
+    "diameter": "50px",
+    "color": "#A5ABB6",
+    "border-color": "#9AA1AC",
+    "border-width": "2px",
+    "text-color-internal": "#FFFFFF",
+    "font-size": "10px"
+  },
+  "relationship": {
+    "color": "#A5ABB6",
+    "shaft-width": "1px",
+    "font-size": "8px",
+    "padding": "3px",
+    "text-color-external": "#000000",
+    "text-color-internal": "#FFFFFF"
+  },
+  "node.Empresa": {
+    "color": "#4C8EDA",
+    "border-color": "#2870c2"
+  },
+  "node.Unidade": {
+    "color": "#57C7E3",
+    "border-color": "#23b3d7"
+  },
+  "node.Missao": {
+    "color": "#D9534F",
+    "border-color": "#be3e3b"
+  },
+  "node.Visao": {
+    "color": "#8CC823",
+    "border-color": "#6db417"
+  },
+  "node.Proposito": {
+    "color": "#F79A20",
+    "border-color": "#e78b13"
+  },
+  "node.Negocio": {
+    "color": "#FFC454",
+    "border-color": "#d7a013"
+  },
+  "node.SistemaApoio": {
+    "color": "#C780E8",
+    "border-color": "#9453af"
+  }
+}
+```

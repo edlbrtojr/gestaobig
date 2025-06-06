@@ -44,7 +44,7 @@ export function AdvancedChart({
 
   // Ensure topResults is an integer
   const normalizedTopResults = useMemo(() => {
-    return typeof topResults === 'number' ? Math.floor(topResults) : 10;
+    return parseInt(String(topResults), 10) || 10;
   }, [topResults]);
 
   // Fetch data for the chart

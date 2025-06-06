@@ -1,32 +1,29 @@
 "use client";
 
-import { useOrganizationConfig } from "./org-config-provider";
-import { useEffect } from "react";
+import { useEffect } from 'react';
+import { siteConfig } from "@/config/site";
 
 export function DynamicFavicon() {
-  const { config } = useOrganizationConfig();
-  
-  // Update the favicon when config changes
   useEffect(() => {
-    if (config?.faviconUrl) {
-      // Find existing favicon link
-      const existingLink = document.querySelector('link[rel="icon"]');
-      
-      if (existingLink) {
-        // Update existing link
-        existingLink.setAttribute('href', config.faviconUrl);
-      } else {
-        // Create new link if none exists
-        const link = document.createElement('link');
-        link.rel = 'icon';
-        link.href = config.faviconUrl;
-        // Set sizes attribute directly
-        document.head.appendChild(link);
-        link.setAttribute('sizes', 'any');
-      }
+    // Get favicon URL from config
+    const faviconUrl = siteConfig.faviconUrl || '/favicon.ico';
+    
+    // Update favicon link element
+    const links = document.querySelectorAll('link[rel="icon"]');
+    
+    if (links.length > 0) {
+      // Update existing favicon links
+      links.forEach(link => {
+        link.setAttribute('href', faviconUrl);
+      });
+    } else {
+      // Create a new favicon link if none exists
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.href = faviconUrl;
+      document.head.appendChild(link);
     }
-  }, [config?.faviconUrl]);
-  
-  // This component doesn't render anything
+  }, []);
+
   return null;
 } 

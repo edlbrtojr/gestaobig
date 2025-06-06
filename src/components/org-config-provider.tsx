@@ -6,7 +6,7 @@ import { OrganizationConfig } from '@/app/api/config/route';
 
 // Create context with default value
 const OrgConfigContext = createContext<{
-  config: OrganizationConfig;
+  config: OrganizationConfig | null;
   isLoading: boolean;
   error: Error | null;
   refreshConfig: () => Promise<void>;

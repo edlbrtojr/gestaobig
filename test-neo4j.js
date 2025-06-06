@@ -5,8 +5,8 @@ require('dotenv').config({ path: '.env.local' });
 async function testConnection() {
   // Obter credenciais do ambiente
   const uri = process.env.NEO4J_URI || "bolt://localhost:7687";
-  const user = process.env.NEO4J_USERNAME || "neo4j";
-  const password = process.env.NEO4J_PASSWORD || "3d1Jun1or";
+  const user = process.env.NEO4J_USER || "neo4j";
+  const password = process.env.NEO4J_PASSWORD || "";
 
   console.log("Tentando conectar ao Neo4j com:");
   console.log(`- URI: ${uri}`);
