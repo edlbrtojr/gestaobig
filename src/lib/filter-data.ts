@@ -90,6 +90,7 @@ export async function fetchNodeTypes(): Promise<string[]> {
       UNWIND nodeLabels as label
       WITH DISTINCT label
       WHERE NOT label IN ["NodeVisibility", "NodePermission", "User", "UserPermission", "AccessRole", "__inAppSchemaConfig", "AdminResetEvent"]
+      AND NOT label STARTS WITH "_"
       RETURN label
       ORDER BY label
     `);
@@ -167,13 +168,27 @@ export async function fetchGraphData() {
   try {
     const result = await executeQuery(`
       MATCH (n)
-      WHERE NOT n:User AND NOT n:UserPermission AND NOT n:AccessRole AND NOT n:NodeVisibility AND NOT n:NodePermission AND NOT n:AdminResetEvent
+      WHERE NOT n:User AND NOT n:UserPermission AND NOT n:AccessRole 
+        AND NOT n:NodeVisibility AND NOT n:NodePermission AND NOT n:AdminResetEvent
+        AND NONE(label IN labels(n) WHERE label STARTS WITH "_")
       OPTIONAL MATCH (n)-[r]-(m)
-      WHERE NOT m:User AND NOT m:UserPermission AND NOT m:AccessRole AND NOT m:NodeVisibility AND NOT m:NodePermission AND NOT m:AdminResetEvent
+      WHERE NOT m:User AND NOT m:UserPermission AND NOT m:AccessRole 
+        AND NOT m:NodeVisibility AND NOT m:NodePermission AND NOT m:AdminResetEvent
+        AND NONE(label IN labels(m) WHERE label STARTS WITH "_")
       WITH n, r, m
       RETURN 
-        collect(distinct n) as nodes,
-        collect(distinct {id: id(r), type: type(r), source: id(startNode(r)), target: id(endNode(r)), properties: properties(r)}) as relationships
+        collect(distinct {
+          id: id(n), 
+          labels: labels(n), 
+          properties: properties(n)
+        }) as nodes,
+        collect(distinct {
+          id: id(r), 
+          type: type(r), 
+          source: id(startNode(r)), 
+          target: id(endNode(r)), 
+          properties: properties(r)
+        }) as relationships
     `);
     
     if (!result.records || result.records.length === 0) {
@@ -182,11 +197,21 @@ export async function fetchGraphData() {
     
     // Extract nodes and relationships from result
     const record = result.records[0];
-    const nodes = record.get('nodes').map((node: any) => ({
-      id: node.identity.toString(),
-      label: node.labels[0], // Pega o primeiro rótulo como o principal
-      properties: node.properties,
-    }));
+    const nodes = record.get('nodes').map((node: any) => {
+      console.log("Node data from Neo4j:", node);
+      
+      // Garantir que temos um array de labels válido
+      const nodeLabels = Array.isArray(node.labels) ? node.labels : 
+                        (typeof node.labels === 'string' ? [node.labels] : []);
+      
+      return {
+        id: node.id.toString(),
+        label: nodeLabels.length > 0 ? nodeLabels[0] : "Unknown", // Pega o primeiro rótulo como o principal
+        labels: nodeLabels, // Adicionar o array completo de labels
+        allLabels: nodeLabels, // Adicionar também como allLabels para compatibilidade
+        properties: node.properties,
+      };
+    });
     
     const relationships = record.get('relationships')
       .filter((rel: any) => rel.id !== null) // Filtra relacionamentos inválidos
@@ -197,6 +222,12 @@ export async function fetchGraphData() {
         target: rel.target.toString(),
         properties: rel.properties,
       }));
+    
+    console.log("Dados processados:", {
+      totalNodes: nodes.length,
+      sampleNodes: nodes.slice(0, 2),
+      totalRelationships: record.get('relationships').length
+    });
     
     return { 
       nodes, 

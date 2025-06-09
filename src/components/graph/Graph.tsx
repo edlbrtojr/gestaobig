@@ -13,6 +13,7 @@ interface GraphProps {
   onNodeSelected?: (node: D3Node | null) => void;
   onRelationshipSelected?: (relationship: D3Link | null) => void;
   searchTerm?: string;
+  nodePriorities?: string[]; // Prioridades de labels para nós com múltiplos tipos
 }
 
 /**
@@ -91,14 +92,18 @@ export function Graph({
   data,
   onNodeSelected,
   onRelationshipSelected,
-  searchTerm
+  searchTerm,
+  nodePriorities = []
 }: GraphProps) {
+  console.log("Graph component recebeu nodePriorities:", nodePriorities);
+  
   return (
     <GraphProvider 
       data={data} 
       searchTerm={searchTerm}
       onNodeSelected={onNodeSelected}
       onRelationshipSelected={onRelationshipSelected}
+      nodePriorities={nodePriorities}
     >
       <GraphContent />
     </GraphProvider>

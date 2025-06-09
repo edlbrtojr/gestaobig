@@ -32,131 +32,109 @@ export const NodeElement = memo(function NodeElement({
   radius,
   labelText
 }: NodeElementProps) {
-  const { colors } = useGraphContext();
+  // Log inicial dos dados recebidos
+  console.log(`NodeElement recebeu node ${node.id}:`, {
+    id: node.id,
+    label: node.label,
+    labels: node.labels,
+    allLabels: node.allLabels,
+    properties: node.properties
+  });
   
-  // Obter cor do nó baseado no tipo
-  const nodeColor = colors.nodeColors[node.label] || colors.defaultColor;
+  // Obter o contexto do grafo para cores, tema e seleção
+  const { colors, nodePriorities } = useGraphContext();
   
-  // Calcular cor da borda baseada no estado
-  const getBorderColor = () => {
-    if (isSelected) return colors.getThemeColors().textColor;
-    if (isConnected) return nodeColor;
-    return nodeColor;
-  };
-  
-  // Calcular opacidade baseada no estado
-  const getOpacity = () => {
-    if (isSelected) return 1;
-    if (isConnected) return 0.8;
-    if (isHighlighted) return 1;
-    return isHighlighted ? 1 : 0.15;
-  };
-  
-  // Calcular espessura da borda baseada no estado
-  const getStrokeWidth = () => {
-    if (isSelected) return 2.5;
-    if (isConnected) return 1.5;
-    return 1.5;
-  };
-  
-  // Obter nome preferido do nó
-  const getNodeName = () => {
-    if (labelText) return labelText;
+  // Obter cor do nó baseado no tipo e prioridades
+  const getNodeColor = () => {
+    console.log(`[Node ${node.id}] Label: ${node.label}, allLabels:`, node.allLabels);
+    console.log(`[Node ${node.id}] nodePriorities:`, nodePriorities);
     
-    return node.properties?.SIGLA || 
-           node.properties?.sigla || 
-           node.properties?.nome || 
-           node.properties?.name || 
-           `Node ${node.id}`;
-  };
-  
-  // Calcular tamanho da fonte baseado no raio do nó
-  const fontSize = Math.min(Math.max(radius * 0.3, 7), 10);
-  
-  // Calcular quantos caracteres cabem por linha
-  const charsPerLine = Math.max(Math.floor((radius * 1.6) / (fontSize * 0.6)), 5);
-  
-  // Preparar nome para exibição
-  const name = getNodeName();
-  const displayName = () => {
-    if (name.length <= charsPerLine) {
-      return <tspan x={0} dy="0">{name}</tspan>;
-    } else {
-      const firstLine = name.substring(0, charsPerLine);
-      let secondLine = "";
+    // Verificar se temos múltiplos labels disponíveis (podem estar em labels ou allLabels)
+    const multiLabels = node.allLabels || node.labels;
+    
+    // Se o nó tem múltiplos labels, usar prioridades
+    if (multiLabels && Array.isArray(multiLabels) && multiLabels.length > 0) {
+      console.log(`[Node ${node.id}] Tem múltiplos labels:`, multiLabels);
       
-      if (name.length > charsPerLine * 2) {
-        secondLine = name.substring(charsPerLine, charsPerLine * 2 - 3) + "...";
-      } else {
-        secondLine = name.substring(charsPerLine);
+      // Verificar se temos prioridades definidas
+      if (nodePriorities && nodePriorities.length > 0) {
+        // Percorrer a lista de prioridades em ordem
+        for (const priorityLabel of nodePriorities) {
+          // Verificar se o nó possui este label
+          if (multiLabels.includes(priorityLabel)) {
+            const color = colors.nodeColors[priorityLabel];
+            console.log(`[Node ${node.id}] Usando cor de label prioritário ${priorityLabel}:`, color);
+            return color || colors.defaultColor;
+          }
+        }
       }
       
-      return (
-        <>
-          <tspan x={0} dy="-0.6em">{firstLine}</tspan>
-          <tspan x={0} dy="1.2em">{secondLine}</tspan>
-        </>
-      );
+      // Se não encontrar nas prioridades ou não tiver prioridades definidas, usar o primeiro label
+      const firstLabel = multiLabels[0];
+      const color = colors.nodeColors[firstLabel];
+      console.log(`[Node ${node.id}] Usando cor do primeiro label ${firstLabel}:`, color);
+      return color || colors.defaultColor;
     }
+    
+    // Caso normal - sem múltiplos labels
+    const color = colors.nodeColors[node.label];
+    console.log(`[Node ${node.id}] Usando cor do label único ${node.label}:`, color);
+    return color || colors.defaultColor;
   };
   
+  const nodeColor = getNodeColor();
+  
+  // Cores baseadas no tema
+  const { textColor, nodeBorderColor } = colors.getThemeColors();
+  
+  // Estados de opacidade baseados na seleção e conexão
+  let fillOpacity = 0.7; // Aumentar opacidade default para melhor visibilidade
+  let strokeOpacity = 0.5;
+  
+  if (isSelected) {
+    fillOpacity = 1;
+    strokeOpacity = 1;
+  } else if (isConnected) {
+    fillOpacity = 0.9;
+    strokeOpacity = 0.7;
+  }
+  
+  // Calcular tamanho do texto baseado no raio
+  const fontSize = Math.max(10, Math.min(radius * 0.6, 16));
+  
   return (
-    <g 
-      className="node-element" 
+    <g
+      className="node-element"
       data-id={node.id}
-      data-label={node.label}
-      onClick={() => onClick(node)}
+      transform={`translate(${node.x || 0},${node.y || 0})`}
       style={{ cursor: "pointer" }}
     >
-      {/* Círculo do nó */}
+      {/* Círculo principal do nó */}
       <circle
         className="node-circle"
         r={radius}
         fill={nodeColor}
-        stroke={getBorderColor()}
-        strokeWidth={getStrokeWidth()}
-        opacity={getOpacity()}
-        style={{ 
-          filter: "url(#node-shadow)",
-          transition: "all 300ms ease-in-out"
-        }}
+        fillOpacity={fillOpacity}
+        stroke={isSelected ? textColor : nodeBorderColor}
+        strokeWidth={isSelected ? 2.5 : 1.5}
+        strokeOpacity={strokeOpacity}
+        filter={isSelected ? "url(#node-shadow)" : undefined}
+        onClick={() => onClick(node)}
       />
       
-      {/* Texto do nome do nó */}
+      {/* Rótulo de texto do nó */}
       <text
-        className="node-name-text"
-        dy={4}
+        className="node-label"
         textAnchor="middle"
-        fill="#FFFFFF"
+        dy="0.3em"
+        fill={textColor}
         fontSize={fontSize}
-        opacity={getOpacity()}
-        style={{ 
-          filter: "url(#text-shadow)",
-          fontWeight: "500",
-          pointerEvents: "none",
-          transition: "all 300ms ease-in-out"
-        }}
+        fontWeight={isSelected ? "bold" : "normal"}
+        pointerEvents="none"
+        opacity={isSelected ? 1 : 0.9}
+        filter={isSelected ? "url(#text-shadow)" : undefined}
       >
-        {displayName()}
-        <title>{name}</title>
-      </text>
-      
-      {/* Texto do tipo do nó */}
-      <text
-        className="node-type-text"
-        dy={radius + 14}
-        textAnchor="middle"
-        fill={colors.getThemeColors().mutedForegroundColor}
-        fontSize="8px"
-        fontStyle="italic"
-        opacity={getOpacity()}
-        style={{ 
-          filter: "url(#text-shadow)",
-          pointerEvents: "none",
-          transition: "all 300ms ease-in-out"
-        }}
-      >
-        {node.label || "Unknown"}
+        {labelText && labelText.length > 12 ? `${labelText.substring(0, 12)}...` : labelText}
       </text>
     </g>
   );

@@ -96,9 +96,16 @@ export default function GraphPage() {
       if (!data.nodes.length) {
         return data;
       }
+      
+      // System node types that should never be displayed
+      const systemNodeTypes = ["NodeVisibility", "NodePermission"];
 
       // Filter nodes based on node types and company (NOT search term anymore)
       let filteredNodes = data.nodes.filter((node) => {
+        // Filter out system node types and nodes with labels starting with underscore
+        if (systemNodeTypes.includes(node.label)) return false;
+        if (node.label && node.label.startsWith('_')) return false;
+        
         // Check if node type is selected in filters
         if (!filters.nodeTypes[node.label]) return false;
 
@@ -357,6 +364,12 @@ export default function GraphPage() {
         clearTimeout(filterDebounceRef.current);
       }
 
+      // Log das prioridades nos filtros para debugging
+      console.log("GraphPage - handleFilterChange:", {
+        nodePriorities: filters.nodePriorities,
+        prioridadesLength: filters.nodePriorities?.length
+      });
+
       // Apply filter changes with an appropriate debounce time
       filterDebounceRef.current = setTimeout(() => {
         // Update the current filters
@@ -596,6 +609,7 @@ export default function GraphPage() {
                     onRelationshipSelected={handleRelationshipSelected}
                     searchTerm={currentFilters?.search}
                     onFilterChange={handleFilterChange}
+                    nodePriorities={currentFilters?.nodePriorities || []}
                   />
                 )}
               </div>

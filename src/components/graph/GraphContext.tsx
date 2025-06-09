@@ -79,6 +79,9 @@ export interface GraphContextType {
   };
   getNodeRadius: (nodeId: number) => number;
   
+  // Prioridades de labels para nós com múltiplos tipos
+  nodePriorities: string[];
+  
   // Estado de edição
   isEditing: boolean;
   setIsEditing: (editing: boolean) => void;

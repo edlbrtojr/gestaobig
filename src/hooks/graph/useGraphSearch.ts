@@ -35,8 +35,16 @@ export function useGraphSearch({ nodes, searchTerm }: UseGraphSearchProps) {
     const matching: D3Node[] = [];
     const matchingIds = new Set<number>();
     
+    // System node types that should never be displayed
+    const systemNodeTypes = ["NodeVisibility", "NodePermission"];
+    
     // Buscar em todas as propriedades dos nós
     nodes.forEach(node => {
+      // Ignorar nós do sistema
+      if (systemNodeTypes.includes(node.label)) return;
+      // Ignorar nós com rótulos começando com underscore (nós do sistema)
+      if (node.label && node.label.startsWith('_')) return;
+      
       // Verificar nome do nó
       const nodeName = String(
         node.properties?.name || 

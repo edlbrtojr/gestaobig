@@ -12,8 +12,9 @@ import { D3Node, D3Link, GraphData } from "@/types/graph";
  * 3. Calcular metadados como contagens de conexões
  * 4. Calcular níveis hierárquicos
  * 5. Categorizar nós por tipo
+ * 6. Aplicar prioridades de labels para nós com múltiplos tipos
  */
-export function useGraphData(data: GraphData) {
+export function useGraphData(data: GraphData, nodePriorities: string[] = []) {
   // Estado para armazenar níveis hierárquicos dos nós
   const [hierarchyLevels, setHierarchyLevels] = useState<Record<number, number>>({});
   // Estado para armazenar nós categorizados por tipo
@@ -33,12 +34,45 @@ export function useGraphData(data: GraphData) {
 
     // Processar nós - filtrar nós do sistema
     const processedNodes = data.nodes
-      .filter((node) => !systemNodeTypes.includes(node.label))
+      .filter((node) => {
+        // Excluir tipos específicos de nós do sistema
+        if (systemNodeTypes.includes(node.label)) return false;
+        // Excluir qualquer nó cujo rótulo comece com underscore (nó do sistema)
+        if (node.label && node.label.startsWith('_')) return false;
+        return true;
+      })
       .map((node) => {
         const nodeId =
           typeof node.id === "object" && node.id !== null
             ? node.id.low
             : Number(node.id);
+
+        // Se o nó tem múltiplos labels (como array), processá-los
+        if (Array.isArray(node.labels) && node.labels.length > 0) {
+          // Salvar todos os labels para referência
+          node.allLabels = [...node.labels];
+          
+          // Se temos prioridades definidas, usá-las para determinar o label principal
+          if (nodePriorities.length > 0) {
+            // Encontrar o label com maior prioridade
+            let highestPriorityLabel = node.labels[0]; // Default para o primeiro
+            let highestPriorityIndex = Number.MAX_SAFE_INTEGER;
+            
+            for (const label of node.labels) {
+              const priorityIndex = nodePriorities.indexOf(label);
+              if (priorityIndex !== -1 && priorityIndex < highestPriorityIndex) {
+                highestPriorityIndex = priorityIndex;
+                highestPriorityLabel = label;
+              }
+            }
+            
+            // Definir o label principal baseado na prioridade
+            node.label = highestPriorityLabel;
+          } else {
+            // Se não há prioridades, usar o primeiro label
+            node.label = node.labels[0];
+          }
+        }
 
         const d3Node = {
           ...node,

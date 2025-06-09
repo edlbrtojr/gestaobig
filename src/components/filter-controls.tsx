@@ -19,6 +19,7 @@ export interface FilterState {
   showIsolatedNodes: boolean;
   company: string;
   unit: string; // New unit filter
+  nodePriorities: string[]; // Ordem de prioridade dos tipos de nós
 }
 
 // Add helper function to translate node type labels
@@ -197,7 +198,7 @@ export default function FilterControls({
     const combinedNodeTypes: Record<string, { color: string }> = {...nodeTypesConfig};
     
     // System node types that should never be displayed
-    const systemNodeTypes = ["NodeVisibility", "NodePermission"];
+    const systemNodeTypes = ["NodeVisibility", "NodePermission", "User", "UserPermission", "AccessRole", "__inAppSchemaConfig", "AdminResetEvent"];
     
     // Add any node types from the data that aren't in the schema
     nodesForDiscovery.forEach(node => {
@@ -222,15 +223,27 @@ export default function FilterControls({
   
   // Use either schema node types or discovered node types
   const effectiveNodeTypes = useMemo(() => {
-    return Object.keys(discoveredNodeTypes).length > 0 ? discoveredNodeTypes : nodeTypesConfig;
+    // Criar uma cópia profunda para não modificar os originais
+    let nodeTypes = Object.keys(discoveredNodeTypes).length > 0 ? {...discoveredNodeTypes} : {...nodeTypesConfig};
+    
+    // Remover explicitamente quaisquer tipos com prefixo underscore
+    Object.keys(nodeTypes).forEach(key => {
+      if (key.startsWith('_')) {
+        delete nodeTypes[key];
+      }
+    });
+    
+    return nodeTypes;
   }, [discoveredNodeTypes, nodeTypesConfig]);
 
   // Memoize default node types filter to prevent recreating on every render
   const defaultNodeTypesFilter = useMemo(() => {
-    return Object.keys(effectiveNodeTypes).reduce((acc, type) => {
-      acc[type] = true;
-      return acc;
-    }, {} as Record<string, boolean>);
+    return Object.keys(effectiveNodeTypes)
+      .filter(type => !type.startsWith('_')) // Filtrar explicitamente nós que começam com underscore
+      .reduce((acc, type) => {
+        acc[type] = true;
+        return acc;
+      }, {} as Record<string, boolean>);
   }, [effectiveNodeTypes]);
 
   // State for filters
@@ -241,6 +254,7 @@ export default function FilterControls({
     showIsolatedNodes: true,
     company: "SISTEMA FIEAC", // Default to SISTEMA FIEAC
     unit: "Todas", // Default to show all units
+    nodePriorities: [], // Lista vazia inicialmente
   }));
   
   // Update filters when node types change
@@ -250,6 +264,23 @@ export default function FilterControls({
         ...prev,
         nodeTypes: defaultNodeTypesFilter
       }));
+      
+      // Inicializar as prioridades com os tipos disponíveis se ainda não estiverem definidas
+      setNodePriorities(prevPriorities => {
+        if (prevPriorities.length === 0) {
+          return Object.keys(defaultNodeTypesFilter).filter(type => !type.startsWith('_'));
+        }
+        
+        // Manter prioridades existentes e adicionar novos tipos ao final
+        const existingSet = new Set(prevPriorities);
+        const updatedPriorities = [...prevPriorities];
+        
+        Object.keys(defaultNodeTypesFilter)
+          .filter(type => !type.startsWith('_') && !existingSet.has(type))
+          .forEach(newType => updatedPriorities.push(newType));
+          
+        return updatedPriorities;
+      });
     }
   }, [defaultNodeTypesFilter]);
   
@@ -267,6 +298,12 @@ export default function FilterControls({
 
   // Track warning message state
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  
+  // Estado para controlar o editor de prioridades
+  const [showPriorityEditor, setShowPriorityEditor] = useState<boolean>(false);
+  
+  // Estado para armazenar a ordem de prioridade dos tipos de nós
+  const [nodePriorities, setNodePriorities] = useState<string[]>([]);
 
   // Helper function to check if a filter change would result in no relationships
   const wouldFilterHaveRelationships = useCallback(
@@ -498,6 +535,7 @@ export default function FilterControls({
       showIsolatedNodes: true,
       company: availableCompanies[0] || "SISTEMA FIEAC",
       unit: "Todas",
+      nodePriorities: nodePriorities, // Manter as prioridades atuais
     });
   };
 
@@ -618,40 +656,63 @@ export default function FilterControls({
           <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
             Tipos de Nós
           </label>
-          <button
-            onClick={() => {
-              // Always select all nodes
-              const newNodeTypes = Object.keys(filters.nodeTypes).reduce(
-                (acc, type) => {
-                  acc[type] = true;
-                  return acc;
-                },
-                {} as Record<string, boolean>
-              );
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowPriorityEditor(!showPriorityEditor)}
+              className={`text-xs px-2.5 py-1.5 flex items-center gap-1.5 ${showPriorityEditor ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' : 'bg-gray-50 dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/70'} rounded-md border transition-colors`}
+              title="Configurar prioridade de estilos para nós com múltiplos tipos"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 20h.01"></path>
+                <path d="M7 20v-4"></path>
+                <path d="M12 20v-8"></path>
+                <path d="M17 20v-6"></path>
+                <path d="M22 20V8"></path>
+              </svg>
+              Prioridades
+              {nodePriorities.length > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-blue-600 dark:bg-blue-500 w-4 h-4 text-[10px] font-medium text-white">
+                  {nodePriorities.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                // Always select all nodes
+                const newNodeTypes = Object.keys(filters.nodeTypes).reduce(
+                  (acc, type) => {
+                    acc[type] = true;
+                    return acc;
+                  },
+                  {} as Record<string, boolean>
+                );
 
-              setWarningMessage(null);
-              setFilters((prev) => ({
-                ...prev,
-                nodeTypes: newNodeTypes,
-              }));
-            }}
-            className="text-xs px-2 py-1 bg-gray-50 dark:bg-gray-800 text-blue-600 dark:text-blue-400 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/70 transition-colors"
-          >
-            Marcar todos
-          </button>
+                setWarningMessage(null);
+                setFilters((prev) => ({
+                  ...prev,
+                  nodeTypes: newNodeTypes,
+                }));
+              }}
+              className="text-xs px-2 py-1 bg-gray-50 dark:bg-gray-800 text-blue-600 dark:text-blue-400 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/70 transition-colors"
+            >
+              Marcar todos
+            </button>
+          </div>
         </div>
 
-        {error ? (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md text-xs text-red-800 dark:bg-red-900/20 dark:border-red-800/30 dark:text-red-300">
-            {error}
-          </div>
-        ) : isLoadingSchema ? (
-          <div className="p-3 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-800 dark:bg-gray-900/20 dark:border-gray-800/30 dark:text-gray-300">
-            Carregando tipos de nós...
-          </div>
-        ) : (
+      {error ? (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-xs text-red-800 dark:bg-red-900/20 dark:border-red-800/30 dark:text-red-300">
+          {error}
+        </div>
+      ) : isLoadingSchema ? (
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-800 dark:bg-gray-900/20 dark:border-gray-800/30 dark:text-gray-300">
+          Carregando tipos de nós...
+        </div>
+      ) : (
+        <>
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 max-h-[240px] overflow-y-auto pr-1 py-1">
             {Object.keys(filters.nodeTypes)
+              .filter(type => !type.startsWith('_')) // Filtrar explicitamente nós que começam com underscore
               .sort()
               .map((type) => (
                 <div key={type} className="flex items-center gap-2">
@@ -678,7 +739,166 @@ export default function FilterControls({
                 </div>
               ))}
           </div>
-        )}
+          
+          {showPriorityEditor && (
+            <div className="mt-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-900 border border-blue-200 dark:border-indigo-900 rounded-md shadow-sm">
+              <div className="mb-3 flex justify-between items-center">
+                <h4 className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 20h.01"></path>
+                    <path d="M7 20v-4"></path>
+                    <path d="M12 20v-8"></path>
+                    <path d="M17 20v-6"></path>
+                    <path d="M22 20V8"></path>
+                  </svg>
+                  Prioridade de Estilos
+                </h4>
+                <button
+                  onClick={() => setShowPriorityEditor(false)}
+                  className="text-xs px-2 py-1 rounded bg-blue-100 dark:bg-gray-700 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Fechar
+                </button>
+              </div>
+              <div className="p-3 mb-3 bg-white dark:bg-gray-800 rounded-md border border-blue-100 dark:border-gray-700">
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  <strong className="font-medium">Como funciona:</strong> Quando um nó possui múltiplos tipos, o tipo com maior prioridade (mais próximo do topo) determinará a aparência visual do nó no grafo.
+                </p>
+              </div>
+              <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                {nodePriorities.map((type, index) => {
+                  // Verificar se o tipo ainda existe nos nodeTypes filtrados
+                  if (!effectiveNodeTypes[type]) return null;
+                  
+                  return (
+                    <div 
+                      key={type}
+                      className={`flex items-center justify-between gap-2 p-2 bg-white dark:bg-gray-900 border ${index === 0 ? 'border-blue-300 dark:border-blue-700' : 'border-gray-200 dark:border-gray-700'} rounded-md cursor-move transition-all hover:shadow-md ${index === 0 ? 'shadow-sm' : ''}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', type);
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.currentTarget.classList.add('opacity-50');
+                      }}
+                      onDragEnd={(e) => {
+                        e.currentTarget.classList.remove('opacity-50');
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        e.currentTarget.classList.add('bg-blue-50', 'dark:bg-blue-900/20');
+                      }}
+                      onDragLeave={(e) => {
+                        e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20');
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20');
+                        const draggedType = e.dataTransfer.getData('text/plain');
+                        if (draggedType !== type) {
+                          const newPriorities = [...nodePriorities];
+                          const draggedIndex = newPriorities.indexOf(draggedType);
+                          const targetIndex = newPriorities.indexOf(type);
+                          newPriorities.splice(draggedIndex, 1);
+                          newPriorities.splice(targetIndex, 0, draggedType);
+                          
+                          setNodePriorities(newPriorities);
+                          
+                          // Atualizar o filtro com as novas prioridades
+                          setFilters(prev => ({
+                            ...prev,
+                            nodePriorities: newPriorities
+                          }));
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-col items-center justify-center w-6">
+                          <span className={`text-xs font-medium ${index === 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}>
+                            {index === 0 ? '1º' : `${index + 1}º`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="inline-block w-4 h-4 rounded-full border border-gray-200 dark:border-gray-600" 
+                            style={{ backgroundColor: effectiveNodeTypes[type]?.color || "#9E9E9E" }}
+                          ></span>
+                          <span className={`${index === 0 ? 'font-medium' : ''}`}>{getNodeTypeLabel(type)}</span>
+                          {index === 0 && (
+                            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
+                              Principal
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={() => {
+                            if (index > 0) {
+                              const newPriorities = [...nodePriorities];
+                              [newPriorities[index], newPriorities[index - 1]] = 
+                                [newPriorities[index - 1], newPriorities[index]];
+                              
+                              setNodePriorities(newPriorities);
+                              
+                              // Atualizar o filtro com as novas prioridades
+                              setFilters(prev => ({
+                                ...prev,
+                                nodePriorities: newPriorities
+                              }));
+                            }
+                          }}
+                          className="text-xs p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-30 transition-colors"
+                          disabled={index === 0}
+                          title="Mover para cima"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m18 15-6-6-6 6"/>
+                          </svg>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (index < nodePriorities.length - 1) {
+                              const newPriorities = [...nodePriorities];
+                              [newPriorities[index], newPriorities[index + 1]] = 
+                                [newPriorities[index + 1], newPriorities[index]];
+                              
+                              setNodePriorities(newPriorities);
+                              
+                              // Atualizar o filtro com as novas prioridades
+                              setFilters(prev => ({
+                                ...prev,
+                                nodePriorities: newPriorities
+                              }));
+                            }
+                          }}
+                          className="text-xs p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-30 transition-colors"
+                          disabled={index === nodePriorities.length - 1}
+                          title="Mover para baixo"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m6 9 6 6 6-6"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 pt-2 border-t border-blue-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
+                <p className="flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 16v-4"></path>
+                    <path d="M12 8h.01"></path>
+                  </svg>
+                  Arraste para reordenar ou use os botões para ajustar a prioridade
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
       </div>
 
       {/* Divider */}

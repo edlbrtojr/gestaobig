@@ -43,6 +43,7 @@ interface GraphProviderProps {
   searchTerm?: string;
   onNodeSelected?: (node: D3Node | null) => void;
   onRelationshipSelected?: (relationship: D3Link | null) => void;
+  nodePriorities?: string[]; // Prioridades de labels para nós com múltiplos tipos
 }
 
 // Define um poll de schema para atualização das cores
@@ -113,7 +114,8 @@ export function GraphProvider({
   data, 
   searchTerm,
   onNodeSelected,
-  onRelationshipSelected 
+  onRelationshipSelected,
+  nodePriorities = [] // Prioridades de labels para nós com múltiplos tipos
 }: GraphProviderProps) {
   // Referências - corrigido os tipos para corresponder à GraphContextType
   const svgRef = useRef<SVGSVGElement>(null);
@@ -155,6 +157,28 @@ export function GraphProvider({
   const [processedData, nodeMap] = useMemo(() => {
     if (!data.nodes.length) return [null, new Map<number, D3Node>()];
     
+    console.log("GraphProvider processando dados:", data.nodes.length, "nós");
+    console.log("Node Priorities:", nodePriorities);
+    
+    // Verificar se os nós recebidos têm a propriedade labels ou allLabels
+    const nodesWithMultipleLabels = data.nodes.filter(n => Array.isArray(n.labels) || Array.isArray(n.allLabels));
+    console.log("Nós com múltiplos labels:", nodesWithMultipleLabels.length);
+    if (nodesWithMultipleLabels.length > 0) {
+      console.log("Exemplo de nó com múltiplos labels:", {
+        id: nodesWithMultipleLabels[0].id,
+        label: nodesWithMultipleLabels[0].label,
+        labels: nodesWithMultipleLabels[0].labels,
+        allLabels: nodesWithMultipleLabels[0].allLabels
+      });
+    }
+    
+    console.log("Amostra de nós:", data.nodes.slice(0, 3).map(n => ({
+      id: n.id, 
+      label: n.label,
+      labels: n.labels,
+      allLabels: n.allLabels
+    })));
+    
     // Create node map only with valid nodes (excluding system nodes)
     const map = new Map<number, D3Node>();
 
@@ -175,6 +199,46 @@ export function GraphProvider({
           typeof node.id === "object" && node.id !== null
             ? node.id.low
             : Number(node.id);
+
+        // Se o nó tem múltiplos labels (como array), processá-los
+        const multiLabels = node.labels || node.allLabels;
+        if (Array.isArray(multiLabels) && multiLabels.length > 0) {
+          console.log(`Nó ${nodeId} tem múltiplos labels:`, multiLabels);
+          
+          // Salvar todos os labels para referência
+          node.allLabels = [...multiLabels];
+          
+          // Se temos prioridades definidas, usá-las para determinar o label principal
+          if (nodePriorities.length > 0) {
+            // Encontrar o label com maior prioridade
+            let highestPriorityLabel = multiLabels[0]; // Default para o primeiro
+            let highestPriorityIndex = Number.MAX_SAFE_INTEGER;
+            
+            for (const label of multiLabels) {
+              const priorityIndex = nodePriorities.indexOf(label);
+              if (priorityIndex !== -1 && priorityIndex < highestPriorityIndex) {
+                highestPriorityIndex = priorityIndex;
+                highestPriorityLabel = label;
+              }
+            }
+            
+            console.log(`Nó ${nodeId}: usando label prioritário ${highestPriorityLabel} (índice ${highestPriorityIndex})`);
+            
+            // Definir o label principal baseado na prioridade
+            node.label = highestPriorityLabel;
+          } else {
+            // Se não há prioridades, usar o primeiro label
+            node.label = multiLabels[0];
+            console.log(`Nó ${nodeId}: usando primeiro label ${node.label} (sem prioridades definidas)`);
+          }
+        } else if (!node.label && Array.isArray(multiLabels) && multiLabels.length > 0) {
+          // Caso especial - se não tem label definido, mas tem labels array
+          node.label = multiLabels[0];
+        } else if (!node.label) {
+          // Fallback para casos onde não temos nenhum label
+          console.warn(`Nó ${nodeId} não tem labels definidos!`);
+          node.label = "Unknown";
+        }
 
         const d3Node = {
           ...node,
@@ -206,7 +270,7 @@ export function GraphProvider({
       },
       map,
     ];
-  }, [data]);
+  }, [data, nodePriorities]);
 
   // Função para determinar cores baseadas no tema
   const getThemeColors = () => {
@@ -391,6 +455,7 @@ export function GraphProvider({
     matchingNodeIds: matchingNodeIdsRef.current,
     getThemeColors,
     getNodeRadius,
+    nodePriorities,
     isEditing,
     setIsEditing,
     isEditingRelationship,

@@ -24,6 +24,7 @@ interface GraphViewProps {
   onNodeSelected?: (node: any) => void;
   onRelationshipSelected?: (relationship: any) => void;
   searchHighlight?: string;
+  nodePriorities?: string[]; // Prioridades de labels para nós com múltiplos tipos
 }
 
 // Default fallback colors for nodes (will be overridden by schema values when available)
@@ -186,7 +187,17 @@ export default function GraphView({
   onNodeSelected,
   onRelationshipSelected,
   searchHighlight,
+  nodePriorities = [],
 }: GraphViewProps) {
+  // Log inicial das props recebidas
+  console.log("GraphView recebeu nodePriorities:", nodePriorities);
+  console.log("GraphView amostra de nós:", data.nodes.slice(0, 2).map(n => ({
+    id: n.id, 
+    label: n.label,
+    labels: n.labels,
+    allLabels: n.allLabels
+  })));
+
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
   const [selectedNode, setSelectedNode] = useState<D3Node | null>(null);
@@ -654,6 +665,34 @@ export default function GraphView({
 
       const nodes: D3Node[] = data.nodes.map((node, i) => {
         const nodeId = extractNodeId(node.id);
+        
+        // Se o nó tem múltiplos labels, aplicar as prioridades
+        if (Array.isArray(node.labels) && node.labels.length > 0) {
+          // Salvar todos os labels para referência
+          node.allLabels = [...node.labels];
+          
+          // Se temos prioridades definidas, usá-las para determinar o label principal
+          if (nodePriorities.length > 0) {
+            // Encontrar o label com maior prioridade
+            let highestPriorityLabel = node.labels[0]; // Default para o primeiro
+            let highestPriorityIndex = Number.MAX_SAFE_INTEGER;
+            
+            for (const label of node.labels) {
+              const priorityIndex = nodePriorities.indexOf(label);
+              if (priorityIndex !== -1 && priorityIndex < highestPriorityIndex) {
+                highestPriorityIndex = priorityIndex;
+                highestPriorityLabel = label;
+              }
+            }
+            
+            // Definir o label principal baseado na prioridade
+            node.label = highestPriorityLabel;
+          } else {
+            // Se não há prioridades, usar o primeiro label
+            node.label = node.labels[0];
+          }
+        }
+        
         // All nodes start at the center with a tiny random offset
         const d3Node = {
           ...node,

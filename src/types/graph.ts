@@ -11,6 +11,8 @@ export interface Neo4jId {
 export interface Node {
   id: Neo4jId | number;
   label: string;
+  labels?: string[]; // Múltiplos labels que um nó pode ter
+  allLabels?: string[]; // Cache de todos os labels processados
   properties: NodeProperties;
 }
 
@@ -35,6 +37,8 @@ export interface GraphData {
 export interface D3Node extends d3.SimulationNodeDatum {
   id: number;
   label: string;
+  labels?: string[]; // Múltiplos labels que um nó pode ter
+  allLabels?: string[]; // Cache de todos os labels processados  
   properties: NodeProperties;
   x?: number;
   y?: number;

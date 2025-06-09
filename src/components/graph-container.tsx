@@ -15,6 +15,7 @@ interface GraphContainerProps {
   onRelationshipSelected?: (relationship: any) => void;
   searchTerm?: string;
   onFilterChange?: (filters: FilterState) => void;
+  nodePriorities?: string[]; // Prioridades de labels para nós com múltiplos tipos
 }
 
 // Using memo to prevent unnecessary re-renders when props haven't changed
@@ -24,8 +25,11 @@ const GraphContainer = memo(
     onNodeSelected,
     onRelationshipSelected,
     searchTerm,
-    onFilterChange
+    onFilterChange,
+    nodePriorities = [] 
   }: GraphContainerProps) {
+    console.log("GraphContainer recebeu nodePriorities:", nodePriorities);
+    
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
     const [graphKey, setGraphKey] = useState(0); // Add a key to force remounting GraphView
@@ -662,6 +666,7 @@ const GraphContainer = memo(
                 onNodeSelected={onNodeSelected} 
                 onRelationshipSelected={onRelationshipSelected}
                 searchHighlight={searchTerm}
+                nodePriorities={nodePriorities}
               />
             ) : (
               <div className="flex flex-col items-center justify-center h-full">
@@ -688,7 +693,24 @@ const GraphContainer = memo(
   (prevProps, nextProps) => {
     // Custom comparison function to prevent unnecessary rerenders
     // Only rerender if the data nodes or relationships actually changed
-    // or if the search term changed
+    // or if the search term changed or if node priorities changed
+    
+    // Verificar se as prioridades mudaram
+    const prevPriorities = prevProps.nodePriorities || [];
+    const nextPriorities = nextProps.nodePriorities || [];
+    
+    // Se o tamanho das prioridades for diferente, rerender
+    if (prevPriorities.length !== nextPriorities.length) {
+      return false;
+    }
+    
+    // Se alguma prioridade mudou, rerender
+    for (let i = 0; i < prevPriorities.length; i++) {
+      if (prevPriorities[i] !== nextPriorities[i]) {
+        return false;
+      }
+    }
+    
     return (
       prevProps.data.nodes.length === nextProps.data.nodes.length &&
       prevProps.data.relationships.length === nextProps.data.relationships.length &&
